@@ -13,7 +13,7 @@ function cleanFileName(fileName) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-// Known curated presets dictionary
+// Known curated car presets
 const CURATED_CARS = {
   '1993_toyota_supra_turbo_mk_iv_versus_2f2f.glb': {
     name: '1993 Toyota Supra Mk IV Turbo (2F2F)',
@@ -83,92 +83,178 @@ const CURATED_CARS = {
   }
 };
 
-// Vite plugin to dynamically scan & watch public/cars-models
-function carAutoScannerPlugin() {
-  const carsDir = path.resolve(process.cwd(), 'public/cars-models');
-  const manifestPath = path.resolve(process.cwd(), 'public/cars-manifest.json');
+// Known curated boat & ship presets
+const CURATED_BOATS = {
+  'boat.glb': {
+    name: 'Paris Horizon Yacht Cruiser',
+    brand: 'Riva Marine',
+    category: 'Luxury Speedboat',
+    targetLength: 10.5,
+    waterlineOffset: 0.16,
+    camScale: 2.3,
+    specs: { topSpeed: '115 KM/H', acceleration: '3.6 SEC', power: '1400 BHP', handling: 'HYDRO JET' },
+    tuning: { maxSpeed: 34, accelRate: 14, gripFactor: 0.85, turnMultiplier: 1.05 }
+  },
+  'tow_boat.glb': {
+    name: 'Seine Harbor Tugboat',
+    brand: 'Paris Port',
+    category: 'Heavy Tug Vessel',
+    targetLength: 11.2,
+    waterlineOffset: 0.18,
+    camScale: 2.4,
+    specs: { topSpeed: '82 KM/H', acceleration: '4.9 SEC', power: '2600 BHP', handling: 'TWIN PROP' },
+    tuning: { maxSpeed: 24, accelRate: 10, gripFactor: 0.9, turnMultiplier: 0.85 }
+  },
+  'aquitaine_-_french_ship.glb': {
+    name: 'FS Aquitaine (D650) Frigate',
+    brand: 'Marine Nationale',
+    category: 'French Naval Warship',
+    targetLength: 24.0,
+    waterlineOffset: 0.22,
+    camScale: 4.3,
+    specs: { topSpeed: '105 KM/H', acceleration: '4.4 SEC', power: '32 MW', handling: 'TURBINE SHIP' },
+    tuning: { maxSpeed: 30, accelRate: 11, gripFactor: 0.82, turnMultiplier: 0.72 }
+  }
+};
 
-  function scanCars() {
-    if (!fs.existsSync(carsDir)) {
-      fs.mkdirSync(carsDir, { recursive: true });
-    }
+// Known curated helicopter presets
+const CURATED_HELICOPTERS = {
+  'helicopter.glb': {
+    name: 'Paris Eurocopter EC135',
+    brand: 'Airbus Heli',
+    category: 'Twin-Turbine Rotorcraft',
+    targetLength: 10.6,
+    waterlineOffset: 0,
+    camScale: 2.3,
+    specs: { topSpeed: '255 KM/H', acceleration: '1.9 SEC', power: '1340 SHP', handling: 'TWIN TURBINE' },
+    tuning: { maxSpeed: 62, accelRate: 22, climbRate: 16, turnMultiplier: 1.25 }
+  },
+  'sh-60b_seahawk_helicopter.glb': {
+    name: 'Sikorsky SH-60B Seahawk',
+    brand: 'Sikorsky Aero',
+    category: 'Naval Twin-Rotor Hawk',
+    targetLength: 14.8,
+    waterlineOffset: 0,
+    camScale: 3.1,
+    specs: { topSpeed: '275 KM/H', acceleration: '2.2 SEC', power: '3800 SHP', handling: 'NAVAL HAWK' },
+    tuning: { maxSpeed: 68, accelRate: 20, climbRate: 15, turnMultiplier: 1.05 }
+  }
+};
 
-    const files = fs.readdirSync(carsDir).filter((file) => {
-      const ext = path.extname(file).toLowerCase();
-      return (ext === '.glb' || ext === '.gltf') && !file.startsWith('.');
-    });
-
-    const carList = files.map((file) => {
-      const curated = CURATED_CARS[file];
-      const name = curated ? curated.name : cleanFileName(file);
-      const brand = curated ? curated.brand : 'Custom Garage';
-      const category = curated ? curated.category : 'Imported Racer';
-      const specs = curated ? curated.specs : {
-        topSpeed: '350 KM/H',
-        acceleration: '2.8 SEC',
-        power: '720 BHP',
-        handling: 'CUSTOM AWD'
-      };
-
-      return {
-        id: file.replace(/\.(glb|gltf)$/i, '').replace(/[^a-zA-Z0-9_-]/g, '-'),
-        fileName: file,
-        name: name,
-        modelPath: `/cars-models/${file}`,
-        brand: brand,
-        category: category,
-        specs: specs,
-        tuning: {
-          maxSpeed: 66,
-          accelRate: 22,
-          gripFactor: 0.9,
-          turnMultiplier: 1.1
-        }
-      };
-    });
-
-    try {
-      fs.writeFileSync(manifestPath, JSON.stringify(carList, null, 2));
-    } catch (e) {
-      console.warn('Could not write cars-manifest.json:', e);
-    }
-
-    return carList;
+function scanModelFolder({ dirPath, manifestPath, urlPrefix, curatedMap, vehicleType, defaultBrand, defaultCategory, defaultSpecs, defaultTuning }) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
   }
 
+  const files = fs.readdirSync(dirPath).filter((file) => {
+    const ext = path.extname(file).toLowerCase();
+    return (ext === '.glb' || ext === '.gltf') && !file.startsWith('.');
+  });
+
+  const list = files.map((file) => {
+    const curated = curatedMap[file];
+    return {
+      id: file.replace(/\.(glb|gltf)$/i, '').replace(/[^a-zA-Z0-9_-]/g, '-'),
+      fileName: file,
+      vehicleType,
+      name: curated ? curated.name : cleanFileName(file),
+      modelPath: `${urlPrefix}/${file}`,
+      brand: curated ? curated.brand : defaultBrand,
+      category: curated ? curated.category : defaultCategory,
+      targetLength: curated?.targetLength || (vehicleType === 'boat' ? 11.0 : vehicleType === 'helicopter' ? 11.5 : 3.9),
+      waterlineOffset: curated?.waterlineOffset ?? (vehicleType === 'boat' ? 0.18 : 0),
+      camScale: curated?.camScale || (vehicleType === 'boat' ? 2.3 : vehicleType === 'helicopter' ? 2.5 : 1.0),
+      specs: curated ? curated.specs : defaultSpecs,
+      tuning: curated?.tuning || defaultTuning
+    };
+  });
+
+  try {
+    fs.writeFileSync(manifestPath, JSON.stringify(list, null, 2));
+  } catch (e) {
+    console.warn(`Could not write ${path.basename(manifestPath)}:`, e);
+  }
+  return list;
+}
+
+// Unified Vite plugin to dynamically scan & watch public/cars-models and public/boats
+function vehicleAutoScannerPlugin() {
+  const sources = [
+    {
+      dirPath: path.resolve(process.cwd(), 'public/cars-models'),
+      manifestPath: path.resolve(process.cwd(), 'public/cars-manifest.json'),
+      urlPrefix: '/cars-models',
+      apiRoute: '/api/cars',
+      hmrEvent: 'cars-updated',
+      curatedMap: CURATED_CARS,
+      vehicleType: 'car',
+      defaultBrand: 'Custom Garage',
+      defaultCategory: 'Imported Racer',
+      defaultSpecs: { topSpeed: '350 KM/H', acceleration: '2.8 SEC', power: '720 BHP', handling: 'CUSTOM AWD' },
+      defaultTuning: { maxSpeed: 66, accelRate: 22, gripFactor: 0.9, turnMultiplier: 1.1 }
+    },
+    {
+      dirPath: path.resolve(process.cwd(), 'public/boats'),
+      manifestPath: path.resolve(process.cwd(), 'public/boats-manifest.json'),
+      urlPrefix: '/boats',
+      apiRoute: '/api/boats',
+      hmrEvent: 'boats-updated',
+      curatedMap: CURATED_BOATS,
+      vehicleType: 'boat',
+      defaultBrand: 'Seine Marine',
+      defaultCategory: 'Watercraft',
+      defaultSpecs: { topSpeed: '95 KM/H', acceleration: '4.0 SEC', power: '1500 BHP', handling: 'MARINE JET' },
+      defaultTuning: { maxSpeed: 28, accelRate: 12, gripFactor: 0.85, turnMultiplier: 0.95 }
+    },
+    {
+      dirPath: path.resolve(process.cwd(), 'public/Helicopters'),
+      manifestPath: path.resolve(process.cwd(), 'public/helicopters-manifest.json'),
+      urlPrefix: '/Helicopters',
+      apiRoute: '/api/helicopters',
+      hmrEvent: 'helicopters-updated',
+      curatedMap: CURATED_HELICOPTERS,
+      vehicleType: 'helicopter',
+      defaultBrand: 'Paris Air',
+      defaultCategory: 'Rotorcraft',
+      defaultSpecs: { topSpeed: '250 KM/H', acceleration: '2.0 SEC', power: '1500 SHP', handling: 'VTOL FLIGHT' },
+      defaultTuning: { maxSpeed: 62, accelRate: 21, climbRate: 15, turnMultiplier: 1.15 }
+    }
+  ];
+
+  const scanAll = () => sources.forEach((src) => scanModelFolder(src));
+
   return {
-    name: 'car-auto-scanner',
+    name: 'vehicle-auto-scanner',
     buildStart() {
-      scanCars();
+      scanAll();
     },
     configureServer(server) {
-      scanCars();
+      scanAll();
 
-      server.watcher.add(carsDir);
-      server.watcher.on('all', (event, filePath) => {
-        if (filePath.startsWith(carsDir)) {
-          console.log(`[AutoScanner] Detected file change (${event}):`, path.basename(filePath));
-          const updatedCars = scanCars();
-          server.ws.send({
-            type: 'custom',
-            event: 'cars-updated',
-            data: updatedCars
-          });
-        }
+      sources.forEach((src) => {
+        server.watcher.add(src.dirPath);
+        server.middlewares.use(src.apiRoute, (req, res) => {
+          const list = scanModelFolder(src);
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.end(JSON.stringify(list));
+        });
       });
 
-      server.middlewares.use('/api/cars', (req, res) => {
-        const carList = scanCars();
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.end(JSON.stringify(carList));
+      server.watcher.on('all', (event, filePath) => {
+        const matched = sources.find((src) => filePath.startsWith(src.dirPath));
+        if (matched) {
+          console.log(`[AutoScanner] Detected change (${event}):`, path.basename(filePath));
+          const updated = scanModelFolder(matched);
+          server.ws.send({ type: 'custom', event: matched.hmrEvent, data: updated });
+        }
       });
     }
   };
 }
 
 export default defineConfig({
-  plugins: [react(), carAutoScannerPlugin()],
+  plugins: [react(), vehicleAutoScannerPlugin()],
   server: {
     port: 5173,
     host: true

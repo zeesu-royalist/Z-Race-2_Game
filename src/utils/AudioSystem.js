@@ -6,7 +6,9 @@ const PROFILES = {
   v8_muscle: { base: [55, 260], f: [500, 2400], osc: 'sawtooth', boost: 1200, gain: [0.38, 0.42, 0.12, 0.30] },
   v12_screamer: { base: [78, 360], f: [700, 3200], osc: 'sawtooth', boost: 1400, gain: [0.35, 0.40, 0.10, 0.30] },
   w16_quad: { base: [60, 280], f: [600, 2600], osc: 'sawtooth', boost: 1300, gain: [0.38, 0.42, 0.12, 0.30] },
-  jdm_turbo: { base: [68, 320], f: [650, 2800], osc: 'sawtooth', boost: 1300, gain: [0.35, 0.40, 0.10, 0.30] }
+  jdm_turbo: { base: [68, 320], f: [650, 2800], osc: 'sawtooth', boost: 1300, gain: [0.35, 0.40, 0.10, 0.30] },
+  marine: { base: [44, 175], f: [400, 1650], osc: 'sawtooth', boost: 750, gain: [0.32, 0.36, 0.09, 0.24] },
+  helicopter: { base: [30, 82], f: [260, 820], osc: 'sawtooth', boost: 340, gain: [0.28, 0.34, 0.08, 0.22] }
 };
 
 class SoundSystem {
@@ -98,6 +100,7 @@ class SoundSystem {
       const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
       const output = noiseBuffer.getChannelData(0);
       for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+      this.noiseBuffer = noiseBuffer;
 
       this.skidNoise = this.ctx.createBufferSource();
       this.skidNoise.buffer = noiseBuffer;
@@ -165,6 +168,8 @@ class SoundSystem {
     else if (cat.includes('muscle')) this.currentProfile = 'v8_muscle';
     else if (cat.includes('scuderia') || cat.includes('vision') || cat.includes('ferrari') || cat.includes('lamborghini')) this.currentProfile = 'v12_screamer';
     else if (cat.includes('w16') || cat.includes('bugatti') || cat.includes('titan')) this.currentProfile = 'w16_quad';
+    else if (cat.includes('boat') || cat.includes('ship') || cat.includes('tug') || cat.includes('yacht') || cat.includes('vessel')) this.currentProfile = 'marine';
+    else if (cat.includes('rotor') || cat.includes('hawk') || cat.includes('heli') || cat.includes('chopper')) this.currentProfile = 'helicopter';
     else this.currentProfile = 'jdm_turbo';
   }
 
@@ -240,6 +245,30 @@ class SoundSystem {
       gain.connect(this.masterGain);
       osc.start(t);
       osc.stop(t + 0.3);
+    } catch {}
+  }
+
+  playWaterSplash(intensity = 1.0) {
+    if (!this.initialized || !this.enabled || !this.ctx || !this.noiseBuffer) return;
+    try {
+      const t = this.ctx.currentTime;
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.noiseBuffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1600, t);
+      filter.frequency.exponentialRampToValueAtTime(220, t + 0.65);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(Math.min(0.7, 0.35 * intensity), t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain);
+      noise.start(t);
+      noise.stop(t + 0.72);
     } catch {}
   }
 

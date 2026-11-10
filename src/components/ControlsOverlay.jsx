@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
+import { WATER_SURFACE_Y } from '../utils/waterSystem';
 import {
   Car,
+  Ship,
+  Fan,
   Volume2,
   VolumeX,
   Camera,
@@ -13,7 +16,8 @@ import {
   Wrench,
   HelpCircle,
   X,
-  Keyboard
+  Keyboard,
+  MapPin
 } from 'lucide-react';
 import { CarCustomizerModal } from './CarCustomizerModal';
 import { soundManager } from '../utils/AudioSystem';
@@ -29,11 +33,14 @@ export function ControlsOverlay() {
   const raceActive = useGameStore((s) => s.raceActive);
   const startRace = useGameStore((s) => s.startRace);
   const stopRace = useGameStore((s) => s.stopRace);
+  const teleportTo = useGameStore((s) => s.teleportTo);
   const carName = useGameStore((s) => s.carName);
   const carBrand = useGameStore((s) => s.carBrand);
+  const vehicleType = useGameStore((s) => s.vehicleType);
 
   const [isGarageOpen, setIsGarageOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [inParis, setInParis] = useState(true);
 
   const getTimeIcon = () => {
     if (timeOfDay === 'day') return <Sun size={18} color="#ffbb00" />;
@@ -80,7 +87,7 @@ export function ControlsOverlay() {
               soundManager.init();
               soundManager.resume();
               if (raceActive) stopRace();
-              else startRace();
+              else { setInParis(false); startRace(); }
             }}
             title={raceActive ? 'End Race' : 'Start Circuit Race'}
           >
@@ -88,14 +95,44 @@ export function ControlsOverlay() {
             <span>{raceActive ? 'ABORT RACE' : 'START RACE'}</span>
           </button>
 
-          {/* Garage / Car Customizer */}
+          {/* Garage / Vehicle, Marina & Helipad Selector */}
           <button
             className="action-pill car-selector-pill"
             onClick={() => setIsGarageOpen(true)}
-            title={`Switch Car / Garage (${carName})`}
+            title={`Switch Vehicle / Boat / Helicopter (${carName})`}
           >
-            <Car size={16} />
+            {vehicleType === 'helicopter' ? <Fan size={16} /> : vehicleType === 'boat' ? <Ship size={16} /> : <Car size={16} />}
             <span>{(carBrand || 'TOYOTA').toUpperCase()}</span>
+          </button>
+
+          {/* Fast Travel between Districts / Harbor Zones */}
+          <button
+            className="action-pill"
+            onClick={() => {
+              soundManager.init();
+              soundManager.resume();
+              if (raceActive) stopRace();
+              const curZ = useGameStore.getState().carPosition[2];
+              const curX = useGameStore.getState().carPosition[0];
+              if (vehicleType === 'boat') {
+                const goingToBay = curZ < 60;
+                teleportTo(goingToBay ? [762, WATER_SURFACE_Y, 174] : [405, WATER_SURFACE_Y, -96], Math.PI / 2);
+                setInParis(goingToBay);
+              } else {
+                const goingToParis = curX < 330;
+                const yAlt = vehicleType === 'helicopter' ? 6.0 : 0.3;
+                teleportTo(goingToParis ? [395, yAlt, -35] : [-3.0, yAlt, 10.0], goingToParis ? Math.PI * 0.4 : 0);
+                setInParis(goingToParis);
+              }
+            }}
+            title={
+              vehicleType === 'boat'
+                ? 'Jump between Seine Marina & Open Harbor Bay'
+                : (inParis ? 'Return to Main City' : 'Teleport to Paris District (or drive East Highway)')
+            }
+          >
+            <MapPin size={15} />
+            <span>{vehicleType === 'boat' ? (inParis ? 'MARINA' : 'OPEN BAY') : (inParis ? 'CITY' : 'PARIS')}</span>
           </button>
 
           {/* Camera View Switcher (Icon Only) */}
@@ -198,13 +235,26 @@ export function ControlsOverlay() {
                   <div className="key-badges">
                     <span className="key-cap wide-key">SPACE</span>
                   </div>
-                  <span className="key-desc">Handbrake / Power Drift</span>
+                  <span className="key-desc">Drift / Heli Climb Up</span>
+                </div>
+                <div className="key-row">
+                  <div className="key-badges">
+                    <span className="key-cap">Q</span>
+                    <span className="key-cap">Z</span>
+                  </div>
+                  <span className="key-desc">Helicopter Descend / Land</span>
                 </div>
                 <div className="key-row">
                   <div className="key-badges">
                     <span className="key-cap wide-key">SHIFT</span>
                   </div>
                   <span className="key-desc">Nitro Boost Surge</span>
+                </div>
+                <div className="key-row">
+                  <div className="key-badges">
+                    <span className="key-cap">E</span>
+                  </div>
+                  <span className="key-desc">Board Boat / Heli or Return to Car</span>
                 </div>
                 <div className="key-row">
                   <div className="key-badges">

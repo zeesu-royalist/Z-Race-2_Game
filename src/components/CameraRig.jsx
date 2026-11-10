@@ -13,10 +13,11 @@ export function getCameraDefaults(mode) {
 
 export function CameraRig() {
   const cameraMode = useGameStore((s) => s.cameraMode);
+  const vehicleCamScale = useGameStore((s) => s.vehicleCamScale);
   const { camera, gl } = useThree();
 
-  const currentCamPos = useRef(new THREE.Vector3(-3, 3, -5));
-  const currentLookAt = useRef(new THREE.Vector3(-3, 1, 15));
+  const currentCamPos = useRef(new THREE.Vector3(390.53, 1.8, -36.45));
+  const currentLookAt = useRef(new THREE.Vector3(396.43, 1.2, -34.54));
   const math = useRef({
     carPosVec: new THREE.Vector3(),
     targetCamPos: new THREE.Vector3(),
@@ -39,8 +40,9 @@ export function CameraRig() {
   });
 
   useEffect(() => {
-    orbit.current.targetDist = getCameraDefaults(cameraMode).dist;
-  }, [cameraMode]);
+    const scale = vehicleCamScale || 1.0;
+    orbit.current.targetDist = getCameraDefaults(cameraMode).dist * scale;
+  }, [cameraMode, vehicleCamScale]);
 
   useEffect(() => {
     const dom = gl.domElement;
@@ -77,9 +79,10 @@ export function CameraRig() {
         orb.prevY = e.clientY;
         orb.lastInteractionTime = performance.now();
       } else if (orb.activeTouches.size === 2 && orb.initialPinchDist > 0) {
+        const scale = useGameStore.getState().vehicleCamScale || 1.0;
         const [t1, t2] = Array.from(orb.activeTouches.values());
         const pinch = Math.hypot(t1.x - t2.x, t1.y - t2.y);
-        orb.targetDist = THREE.MathUtils.clamp(orb.initialPinchTargetDist * (orb.initialPinchDist / Math.max(1, pinch)), 1.8, 12.0);
+        orb.targetDist = THREE.MathUtils.clamp(orb.initialPinchTargetDist * (orb.initialPinchDist / Math.max(1, pinch)), 1.8 * scale, 12.0 * scale);
         orb.lastInteractionTime = performance.now();
       }
     };
@@ -99,14 +102,16 @@ export function CameraRig() {
 
     const onWheel = (e) => {
       e.preventDefault();
-      orbit.current.targetDist = THREE.MathUtils.clamp(orbit.current.targetDist * (e.deltaY > 0 ? 1.10 : 0.90), 1.8, 12.0);
+      const scale = useGameStore.getState().vehicleCamScale || 1.0;
+      orbit.current.targetDist = THREE.MathUtils.clamp(orbit.current.targetDist * (e.deltaY > 0 ? 1.10 : 0.90), 1.8 * scale, 12.0 * scale);
       orbit.current.lastInteractionTime = performance.now();
     };
 
     const onDblClick = () => {
+      const scale = useGameStore.getState().vehicleCamScale || 1.0;
       orbit.current.yaw = 0;
       orbit.current.pitch = 0;
-      orbit.current.targetDist = getCameraDefaults(cameraMode).dist;
+      orbit.current.targetDist = getCameraDefaults(cameraMode).dist * scale;
     };
 
     dom.addEventListener('pointerdown', onPointerDown);
@@ -131,11 +136,15 @@ export function CameraRig() {
     const dt = Math.min(delta, 0.05);
     const m = math.current;
     const orb = orbit.current;
-    const { carPosition, carRotation, speed, isNitroActive } = useGameStore.getState();
+    const { carPosition, carRotation, speed, isNitroActive, vehicleCamScale: storeCamScale } = useGameStore.getState();
 
     m.carPosVec.set(carPosition[0], carPosition[1], carPosition[2]);
 
+    const camScale = storeCamScale || 1.0;
     const camCfg = getCameraDefaults(cameraMode);
+    const scaledDist = camCfg.dist * camScale;
+    const scaledHeight = camCfg.height * (1 + (camScale - 1) * 0.68);
+    const scaledLookHeight = camCfg.lookHeight * (1 + (camScale - 1) * 0.42);
     const speedKmH = Math.abs(speed);
     const isDriving = speedKmH > 2.5 || inputState.forward || inputState.backward || inputState.left || inputState.right;
 
@@ -145,7 +154,7 @@ export function CameraRig() {
       const returnSpeed = 3.2 + Math.min(speedKmH / 30, 4.5);
       orb.yaw = THREE.MathUtils.lerp(yawDiff, 0, returnSpeed * dt);
       orb.pitch = THREE.MathUtils.lerp(orb.pitch, 0, 3.8 * dt);
-      orb.targetDist = THREE.MathUtils.lerp(orb.targetDist, camCfg.dist, 3.2 * dt);
+      orb.targetDist = THREE.MathUtils.lerp(orb.targetDist, scaledDist, 3.2 * dt);
     }
 
     orb.distance = THREE.MathUtils.lerp(orb.distance, orb.targetDist, 10.0 * dt);
@@ -153,7 +162,7 @@ export function CameraRig() {
     const camAzimuth = carRotation + Math.PI + orb.yaw;
     const horizDist = orb.distance * Math.cos(orb.pitch);
     const vertDist = orb.distance * Math.sin(orb.pitch);
-    const clampedY = Math.max(m.carPosVec.y + 0.35, m.carPosVec.y + camCfg.height + vertDist);
+    const clampedY = Math.max(m.carPosVec.y + 0.35 * camScale, m.carPosVec.y + scaledHeight + vertDist);
 
     m.targetCamPos.set(
       m.carPosVec.x + horizDist * Math.sin(camAzimuth),
@@ -163,7 +172,7 @@ export function CameraRig() {
 
     m.targetLookAt.set(
       m.carPosVec.x + 0.3 * Math.sin(carRotation),
-      m.carPosVec.y + camCfg.lookHeight + Math.max(0, vertDist * 0.2),
+      m.carPosVec.y + scaledLookHeight + Math.max(0, vertDist * 0.2),
       m.carPosVec.z + 0.3 * Math.cos(carRotation)
     );
 
@@ -179,7 +188,7 @@ export function CameraRig() {
     const camLerpSpeed = orb.isDragging ? 22.0 : 14.0 + speedFactor * 14.0;
     const lookLerpSpeed = orb.isDragging ? 24.0 : 18.0 + speedFactor * 12.0;
 
-    if (currentCamPos.current.distanceTo(m.targetCamPos) > 35) {
+    if (currentCamPos.current.distanceTo(m.targetCamPos) > 35 * camScale) {
       currentCamPos.current.copy(m.targetCamPos);
       currentLookAt.current.copy(m.targetLookAt);
     } else {

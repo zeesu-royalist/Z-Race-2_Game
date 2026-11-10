@@ -1,11 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useGameStore } from '../store/gameStore';
+import { useGameStore, BOAT_SPAWN_POS, BOAT_SPAWN_ROT_Y, HELI_SPAWN_POS, HELI_SPAWN_ROT_Y } from '../store/gameStore';
 import { CarModel } from './CarModel';
 import { soundManager } from '../utils/AudioSystem';
 import { cityColliders } from './CityMap';
 import { rivalCarsSim } from './RivalCars';
+import { WATER_SURFACE_Y, WATER_ZONE, getWaterHeight, getWaterNormal } from '../utils/waterSystem';
 import {
   checkCarCollision,
   PLAYER_HALF_LENGTH,
@@ -21,7 +22,8 @@ export const inputState = {
   left: false,
   right: false,
   handbrake: false,
-  nitro: false
+  nitro: false,
+  descend: false
 };
 
 const KEY_MAP = {
@@ -30,19 +32,34 @@ const KEY_MAP = {
   KeyA: 'left', ArrowLeft: 'left',
   KeyD: 'right', ArrowRight: 'right',
   Space: 'handbrake',
-  ShiftLeft: 'nitro', ShiftRight: 'nitro'
+  ShiftLeft: 'nitro', ShiftRight: 'nitro',
+  KeyQ: 'descend', KeyZ: 'descend', ControlLeft: 'descend'
 };
 
 const ACTION_KEYS = {
   KeyR: () => useGameStore.getState().triggerReset(),
   KeyC: () => useGameStore.getState().cycleCameraMode(),
   KeyM: () => useGameStore.getState().toggleSound(),
-  KeyT: () => useGameStore.getState().cycleTimeOfDay()
+  KeyT: () => useGameStore.getState().cycleTimeOfDay(),
+  KeyE: () => {
+    const st = useGameStore.getState();
+    const prompt = st.nearbyPrompt;
+    if (prompt?.kind === 'board_boat' || prompt?.kind === 'board_heli') {
+      st.boardWorldVehicle(
+        prompt.vehicleType || (prompt.kind === 'board_heli' ? 'helicopter' : 'boat'),
+        prompt.targetId,
+        prompt.carParkSpot || st.carPosition,
+        prompt.carRotY ?? st.carRotation
+      );
+    } else if (prompt?.kind === 'return_car') {
+      st.returnToParkedCar(st.carPosition, st.carRotation);
+    }
+  }
 };
 
 const GEAR_MINS = [0, 0, 45, 85, 125, 165, 205];
-const SPAWN_POS = new THREE.Vector3(-3.0, 0.3, 10.0);
-const SPAWN_ROT_Y = 0;
+const SPAWN_POS = new THREE.Vector3(395, 0.25, -35);
+const SPAWN_ROT_Y = Math.PI * 0.4;
 
 export function Car() {
   const carGroup = useRef();
@@ -50,11 +67,14 @@ export function Car() {
   const resetSignal = useGameStore((s) => s.resetSignal);
   const teleportSignal = useGameStore((s) => s.teleportSignal);
   const currentCarId = useGameStore((s) => s.currentCarId);
+  const vehicleType = useGameStore((s) => s.vehicleType);
   const soundEnabled = useGameStore((s) => s.soundEnabled);
 
   const activeCarCategoryRef = useRef('jdm_turbo');
   const tuningRef = useRef({ maxSpeed: 64, accelRate: 19, gripFactor: 0.9, turnMultiplier: 1.0 });
   const lastCrashSoundTime = useRef(0);
+  const handledTeleportRef = useRef(0);
+  const lastDryPoseRef = useRef({ pos: [395, 0.25, -35], rotY: Math.PI * 0.4, valid: false });
 
   const state = useRef({
     position: SPAWN_POS.clone(),
@@ -77,7 +97,8 @@ export function Car() {
     nitro: 100,
     isNitroActive: false,
     nitroCooldown: 0,
-    nitroLocked: false
+    nitroLocked: false,
+    isInWater: false
   });
 
   const math = useRef({
@@ -86,6 +107,8 @@ export function Car() {
     forwardVec: new THREE.Vector3(),
     rightVec: new THREE.Vector3(),
     normalVec: new THREE.Vector3(0, 1, 0),
+    tmpNorm: new THREE.Vector3(0, 1, 0),
+    waterNorm: new THREE.Vector3(0, 1, 0),
     wallRaycaster: new THREE.Raycaster(),
     rayOrigin: new THREE.Vector3(),
     wallOrigin: new THREE.Vector3(),
@@ -121,19 +144,40 @@ export function Car() {
     };
   }, []);
 
-  // Handle Car Reset Signal
+  // Shared helper to place car cleanly on road and clear velocities/water state
+  const placeCarAt = (x, y, z, rotY) => {
+    const s = state.current;
+    s.position.set(x, y, z);
+    s.rotationY = rotY;
+    s.pitch = s.roll = s.speed = s.steerAngle = s.angularVelocity = s.verticalVelocity = s.driftScore = s.driftTimer = 0;
+    s.isDrifting = false;
+    s.isGrounded = true;
+    s.isInWater = false;
+    s.currentGear = 1;
+    s.rpm = 900;
+    useGameStore.setState({ isInWater: false });
+    if (carGroup.current) {
+      carGroup.current.position.copy(s.position);
+      carGroup.current.rotation.set(0, s.rotationY, 0);
+    }
+  };
+
+  // Handle Vehicle Reset Signal (keeps player at boat home berth or current city district)
   useEffect(() => {
     if (resetSignal > 0) {
-      const s = state.current;
-      s.position.copy(SPAWN_POS);
-      s.rotationY = SPAWN_ROT_Y;
-      s.pitch = s.roll = s.speed = s.steerAngle = s.angularVelocity = s.verticalVelocity = s.driftScore = s.driftTimer = 0;
-      s.isDrifting = false;
-      s.currentGear = 1;
-      s.rpm = 900;
-      if (carGroup.current) {
-        carGroup.current.position.copy(s.position);
-        carGroup.current.rotation.set(0, s.rotationY, 0);
+      const st = useGameStore.getState();
+      if (st.vehicleType === 'boat' || st.vehicleType === 'helicopter') {
+        const list = st.vehicleType === 'helicopter' ? st.dockedHelicopters : st.dockedBoats;
+        const homeSlot = list.find((v) => v.id === st.currentCarId);
+        const pos = homeSlot?.homePosition || (st.vehicleType === 'helicopter' ? HELI_SPAWN_POS : BOAT_SPAWN_POS);
+        const rotY = homeSlot?.homeRotationY ?? (st.vehicleType === 'helicopter' ? HELI_SPAWN_ROT_Y : BOAT_SPAWN_ROT_Y);
+        st.switchLock.cooldownUntil = performance.now() + 2000;
+        st.switchLock.armedCarReturn = false;
+        placeCarAt(pos[0], pos[1], pos[2], rotY);
+      } else if (state.current.position.x > 330) {
+        placeCarAt(SPAWN_POS.x, SPAWN_POS.y, SPAWN_POS.z, SPAWN_ROT_Y);
+      } else {
+        placeCarAt(-3.0, 0.3, 10.0, 0);
       }
     }
   }, [resetSignal]);
@@ -145,39 +189,46 @@ export function Car() {
 
   // Fast Travel & District Teleport Handler
   useEffect(() => {
-    if (teleportSignal > 0) {
+    if (teleportSignal > handledTeleportRef.current) {
+      handledTeleportRef.current = teleportSignal;
       const target = useGameStore.getState().teleportTarget;
       if (target) {
-        const s = state.current;
-        s.position.set(target.pos[0], target.pos[1], target.pos[2]);
-        s.rotationY = target.rotY;
-        s.pitch = s.roll = s.speed = s.steerAngle = s.angularVelocity = s.verticalVelocity = 0;
-        s.isGrounded = true;
-        if (carGroup.current) {
-          carGroup.current.position.copy(s.position);
-          carGroup.current.rotation.set(0, s.rotationY, 0);
-        }
+        placeCarAt(target.pos[0], target.pos[1], target.pos[2], target.rotY);
       }
     }
   }, [teleportSignal]);
 
-  // Cache tuning and sound profile once when car changes
+  // Cache tuning and sound profile once when active vehicle changes
   useEffect(() => {
     const s = state.current;
     s.speed = s.angularVelocity = s.steerAngle = s.verticalVelocity = 0;
-    const car = useGameStore.getState().cars.find((c) => c.id === currentCarId);
-    if (car) {
-      activeCarCategoryRef.current = car.category || '';
-      tuningRef.current = car.tuning || { maxSpeed: 64, accelRate: 19, gripFactor: 0.9, turnMultiplier: 1.0 };
-      soundManager.setProfile(car.category || '');
+    const st = useGameStore.getState();
+    const pool = st.vehicleType === 'boat' ? st.boats : st.vehicleType === 'helicopter' ? st.helicopters : st.cars;
+    const vehicle = pool.find((c) => c.id === currentCarId);
+    if (vehicle) {
+      activeCarCategoryRef.current = vehicle.category || '';
+      tuningRef.current = vehicle.tuning || { maxSpeed: 64, accelRate: 19, gripFactor: 0.9, turnMultiplier: 1.0 };
+      soundManager.setProfile(vehicle.category || '');
     }
-  }, [currentCarId]);
+  }, [currentCarId, vehicleType]);
 
   // Highly Optimized 60-120 FPS Vehicle Physics Loop
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     const dt = Math.min(delta, 0.05);
+    const elapsed = clock.getElapsedTime();
     const s = state.current;
     const m = math.current;
+    const st = useGameStore.getState();
+
+    // Synchronously consume pending teleport before physics ticks (prevents 1-frame race after Zustand updates)
+    if (st.teleportSignal > handledTeleportRef.current && st.teleportTarget) {
+      handledTeleportRef.current = st.teleportSignal;
+      placeCarAt(st.teleportTarget.pos[0], st.teleportTarget.pos[1], st.teleportTarget.pos[2], st.teleportTarget.rotY);
+      st.switchLock.armedCarReturn = false;
+    }
+
+    const isBoat = st.vehicleType === 'boat';
+    const isHeli = st.vehicleType === 'helicopter';
 
     // 1. NITRO BOOST LOGIC (Auto-accelerates even without pressing GAS)
     if (s.nitro <= 0) s.nitroLocked = true;
@@ -199,32 +250,32 @@ export function Car() {
     }
     const isDrivingForward = inputState.forward || s.isNitroActive;
 
-    // 2. STEERING DYNAMICS (Speed-sensitive)
+    // 2. STEERING DYNAMICS (Speed-sensitive; boats use heavier rudder response)
     const speedKmH = Math.abs(s.speed * 3.6);
     const speedFactor = Math.max(0.28, 1.0 - (speedKmH / 220) * 0.72);
-    const maxSteer = 0.58 * speedFactor;
-    const steerSpeed = 4.8 * dt;
+    const maxSteer = (isBoat ? 0.50 : 0.58) * speedFactor;
+    const steerSpeed = (isBoat ? 3.4 : 4.8) * dt;
 
     if (inputState.left) {
       s.steerAngle = Math.min(maxSteer, s.steerAngle + steerSpeed);
     } else if (inputState.right) {
       s.steerAngle = Math.max(-maxSteer, s.steerAngle - steerSpeed);
     } else {
-      s.steerAngle = THREE.MathUtils.lerp(s.steerAngle, 0, 8.5 * dt);
+      s.steerAngle = THREE.MathUtils.lerp(s.steerAngle, 0, (isBoat ? 5.0 : 8.5) * dt);
     }
 
     const tuning = tuningRef.current;
-    const raceCountdown = useGameStore.getState().raceCountdown;
+    const raceCountdown = st.raceCountdown;
     const isLockedByCountdown = raceCountdown !== null && raceCountdown > 0;
 
-    const normalMaxSpeed = tuning.maxSpeed || 64;
+    const normalMaxSpeed = tuning.maxSpeed || (isBoat ? 28 : isHeli ? 62 : 64);
     const maxForwardSpeed = normalMaxSpeed * nitroMultiplier;
-    const maxReverseSpeed = -15;
-    const accelRate = (tuning.accelRate || 19) * nitroMultiplier;
-    const brakeRate = 34;
-    const naturalFriction = 3.6;
+    const maxReverseSpeed = isBoat ? -12 : isHeli ? -22 : -15;
+    const accelRate = (tuning.accelRate || (isBoat ? 12 : isHeli ? 22 : 19)) * nitroMultiplier;
+    const brakeRate = isBoat ? 14 : isHeli ? 20 : 34;
+    const naturalFriction = isBoat ? 2.1 : isHeli ? 5.0 : 3.6;
 
-    // When nitro is NOT active, bleed excess boost speed back to normal car top speed
+    // When nitro is NOT active, bleed excess boost speed back to normal top speed
     if (!s.isNitroActive && s.speed > normalMaxSpeed) {
       s.speed = Math.max(normalMaxSpeed, s.speed - 14.0 * dt);
     }
@@ -256,25 +307,31 @@ export function Car() {
     }
 
     let gripFactor = 1.0;
-    if (inputState.handbrake) {
-      gripFactor = 0.28;
-      s.speed = Math.max(0, s.speed - 12 * dt);
+    if (inputState.handbrake && !isHeli) {
+      gripFactor = isBoat ? 0.85 : 0.28;
+      s.speed = Math.max(0, s.speed - (isBoat ? 9 : 12) * dt);
       s.isBraking = true;
     }
 
     // 4. YAW ROTATION & DRIFT
     const directionSign = s.speed < -0.5 ? -1 : 1;
     let turnRate = 0;
-    if (Math.abs(s.speed) > 0.2) {
-      turnRate = s.steerAngle * (Math.abs(s.speed) / 5.5) * directionSign * (tuning.turnMultiplier || 1.0);
-      if (inputState.handbrake && Math.abs(s.speed) > 5) turnRate *= 1.85;
+    if (isHeli) {
+      const yawInput = (inputState.left ? 1 : 0) - (inputState.right ? 1 : 0);
+      turnRate = yawInput * 1.45 * (tuning.turnMultiplier || 1.15);
+    } else if (Math.abs(s.speed) > 0.2) {
+      turnRate = s.steerAngle * (Math.abs(s.speed) / (isBoat ? 7.2 : 5.5)) * directionSign * (tuning.turnMultiplier || 1.0);
+      if (inputState.handbrake && Math.abs(s.speed) > 5) turnRate *= isBoat ? 1.35 : 1.85;
+    } else if (isBoat && Math.abs(s.steerAngle) > 0.02) {
+      // Bow thruster pivot for low-speed harbor maneuvering
+      turnRate = s.steerAngle * 0.65 * (tuning.turnMultiplier || 1.0);
     }
 
-    s.angularVelocity = THREE.MathUtils.lerp(s.angularVelocity, turnRate, 9.5 * dt);
+    s.angularVelocity = THREE.MathUtils.lerp(s.angularVelocity, turnRate, (isBoat || isHeli ? 5.5 : 9.5) * dt);
     s.rotationY += s.angularVelocity * dt;
 
-    // 4.1 SUSTAINED DRIFT CHECK (Prevents casual steering from flashing drift UI)
-    const canDrift = s.isGrounded && speedKmH > 38 && (inputState.handbrake || (Math.abs(s.steerAngle) > 0.24 && speedKmH > 60));
+    // 4.1 SUSTAINED DRIFT CHECK (Road cars only)
+    const canDrift = !isBoat && !isHeli && s.isGrounded && speedKmH > 38 && (inputState.handbrake || (Math.abs(s.steerAngle) > 0.24 && speedKmH > 60));
     s.driftTimer = canDrift ? s.driftTimer + dt : Math.max(0, s.driftTimer - dt * 2.5);
     s.isDrifting = s.driftTimer > (inputState.handbrake ? 0.12 : 0.45);
     s.driftIntensity = s.isDrifting ? Math.min(1.0, (speedKmH / 100) * (inputState.handbrake ? 1.4 : 0.9)) : 0;
@@ -299,8 +356,8 @@ export function Car() {
     }
 
     // 5.1 CAR-TO-CAR RACING COLLISION (Player vs 6 Rival Cars)
-    const { raceActive, raceFinished } = useGameStore.getState();
-    if (raceActive || raceFinished) {
+    const { raceActive, raceFinished } = st;
+    if (!isBoat && !isHeli && (raceActive || raceFinished)) {
       const px = s.position.x;
       const pz = s.position.z;
       const pRot = s.rotationY;
@@ -357,98 +414,217 @@ export function Car() {
       }
     }
 
-    // 6. BVH SUSPENSION & ROAD RAYCAST (Zero Heap Allocation)
-    if (cityColliders.length > 0) {
-      m.rayOrigin.copy(s.position);
-      m.rayOrigin.y += 0.45;
-      m.raycaster.set(m.rayOrigin, m.downVec);
-      m.raycaster.far = 25.0;
-
-      m.groundHits.length = 0;
-      m.raycaster.intersectObjects(cityColliders, false, m.groundHits);
-      const groundHits = m.groundHits;
-
-      let validHit = null;
-      for (let i = 0; i < groundHits.length; i++) {
-        const h = groundHits[i];
-        if (h.normal && h.normal.y > 0.45 && h.point.y <= s.position.y + 0.35) {
-          validHit = h;
-          break;
+    // 6. BVH SUSPENSION, WATER HYDRODYNAMICS & HELICOPTER VTOL FLIGHT
+    if (isHeli) {
+      if (s.isInWater) {
+        s.isInWater = false;
+        useGameStore.setState({ isInWater: false });
+      }
+      let floorY = WATER_SURFACE_Y + 0.18;
+      if (cityColliders.length > 0) {
+        m.rayOrigin.copy(s.position);
+        m.rayOrigin.y += 1.5;
+        m.raycaster.set(m.rayOrigin, m.downVec);
+        m.raycaster.far = 220.0;
+        m.groundHits.length = 0;
+        m.raycaster.intersectObjects(cityColliders, false, m.groundHits);
+        for (let i = 0; i < m.groundHits.length; i++) {
+          const h = m.groundHits[i];
+          const rawN = h.normal || h.face?.normal;
+          if (!rawN) continue;
+          m.tmpNorm.copy(rawN).transformDirection(h.object.matrixWorld);
+          if (m.tmpNorm.y < 0 && h.object.material?.side === THREE.DoubleSide) m.tmpNorm.negate();
+          if (m.tmpNorm.y > 0.45 && h.point.y <= s.position.y + 1.5) {
+            floorY = Math.max(floorY, h.point.y + 0.02);
+            break;
+          }
         }
       }
 
-      if (validHit) {
-        const targetY = validHit.point.y + 0.02;
-        if (s.position.y - targetY <= 0.45) {
-          s.position.y = THREE.MathUtils.lerp(s.position.y, targetY, 24.0 * dt);
-          s.verticalVelocity = 0;
-          s.isGrounded = true;
-          if (validHit.normal) {
-            m.normalVec.copy(validHit.normal);
-            const targetPitch = m.normalVec.z * Math.cos(s.rotationY) + m.normalVec.x * Math.sin(s.rotationY);
-            s.pitch = THREE.MathUtils.lerp(s.pitch, -targetPitch * 0.4, 10.0 * dt);
+      const climbSpd = tuning.climbRate || 16;
+      let targetVz = 0;
+      if (inputState.handbrake) {
+        targetVz = climbSpd;
+      } else if (inputState.descend) {
+        targetVz = -climbSpd * 0.85;
+      } else if (isDrivingForward && s.position.y < floorY + 2.2) {
+        // Gentle automatic hover lift when throttling forward from helipad
+        targetVz = 4.2;
+      }
+
+      s.verticalVelocity = THREE.MathUtils.lerp(s.verticalVelocity, targetVz, 5.5 * dt);
+      s.position.y = Math.min(155.0, s.position.y + s.verticalVelocity * dt);
+      if (s.position.y <= floorY) {
+        s.position.y = floorY;
+        if (s.verticalVelocity < 0) s.verticalVelocity = 0;
+        s.isGrounded = true;
+      } else {
+        s.isGrounded = false;
+      }
+
+      const fwdFrac = THREE.MathUtils.clamp(s.speed / (normalMaxSpeed || 62), -0.6, 1.0);
+      const targetPitch = s.isGrounded ? 0 : fwdFrac * 0.21;
+      const targetRoll = s.isGrounded ? 0 : -s.angularVelocity * 0.22 * (0.35 + 0.65 * Math.abs(fwdFrac));
+      s.pitch = THREE.MathUtils.lerp(s.pitch, targetPitch, 5.5 * dt);
+      s.roll = THREE.MathUtils.lerp(s.roll, targetRoll, 5.5 * dt);
+    } else if (isBoat) {
+      if (s.isInWater) {
+        s.isInWater = false;
+        useGameStore.setState({ isInWater: false });
+      }
+      const wY = getWaterHeight(s.position.x, s.position.z, elapsed) ?? WATER_SURFACE_Y;
+      const speedRatio = Math.min(1, Math.max(0, s.speed) / (normalMaxSpeed || 28));
+      const planingLift = speedRatio * 0.14;
+      s.position.y = THREE.MathUtils.lerp(s.position.y, wY + planingLift, Math.min(1, 10.0 * dt));
+      s.verticalVelocity = 0;
+      s.isGrounded = true;
+
+      getWaterNormal(s.position.x, s.position.z, elapsed, m.waterNorm);
+      const wavePitch = m.waterNorm.z * Math.cos(s.rotationY) + m.waterNorm.x * Math.sin(s.rotationY);
+      const waveRoll = -m.waterNorm.x * Math.cos(s.rotationY) + m.waterNorm.z * Math.sin(s.rotationY);
+      const bowTrimPitch = -(speedRatio * 0.055 + (s.isNitroActive ? 0.035 : 0));
+      const turnBankRoll = -s.angularVelocity * 0.08 * speedRatio;
+      s.pitch = THREE.MathUtils.lerp(s.pitch, wavePitch * 1.15 + bowTrimPitch, 5.5 * dt);
+      s.roll = THREE.MathUtils.lerp(s.roll, waveRoll * 1.15 + turnBankRoll, 5.5 * dt);
+    } else {
+      const waterY = getWaterHeight(s.position.x, s.position.z, elapsed);
+      const inWaterNow = waterY !== null && s.position.y < waterY - 0.10;
+      if (inWaterNow && !s.isInWater) {
+        soundManager.playWaterSplash(Math.min(1.6, Math.abs(s.verticalVelocity) * 0.08 + Math.abs(s.speed) * 0.03 + 0.4));
+      }
+      if (inWaterNow !== s.isInWater) {
+        s.isInWater = inWaterNow;
+        useGameStore.setState({ isInWater: inWaterNow });
+      }
+
+      if (cityColliders.length > 0) {
+        m.rayOrigin.copy(s.position);
+        m.rayOrigin.y += 1.25;
+        m.raycaster.set(m.rayOrigin, m.downVec);
+        m.raycaster.far = 30.0;
+
+        m.groundHits.length = 0;
+        m.raycaster.intersectObjects(cityColliders, false, m.groundHits);
+        const groundHits = m.groundHits;
+
+        let validHit = null;
+        for (let i = 0; i < groundHits.length; i++) {
+          const h = groundHits[i];
+          const rawN = h.normal || h.face?.normal;
+          if (!rawN) continue;
+          m.tmpNorm.copy(rawN).transformDirection(h.object.matrixWorld);
+          if (m.tmpNorm.y < 0 && h.object.material?.side === THREE.DoubleSide) {
+            m.tmpNorm.negate();
           }
-        } else {
-          s.isGrounded = false;
-          s.verticalVelocity -= 22.0 * dt;
-          s.position.y += s.verticalVelocity * dt;
-          if (s.position.y <= targetY) {
-            s.position.y = targetY;
+          // Only upward-facing drivable surfaces within +1.05m step-up (avoids snapping onto bridges overhead)
+          if (m.tmpNorm.y > 0.45 && h.point.y <= s.position.y + 1.05) {
+            validHit = h;
+            m.normalVec.copy(m.tmpNorm);
+            break;
+          }
+        }
+
+        if (validHit) {
+          const targetY = validHit.point.y + 0.02;
+          if (s.position.y - targetY <= 0.65) {
+            s.position.y = THREE.MathUtils.lerp(s.position.y, targetY, Math.min(1, 26.0 * dt));
+            if (targetY - s.position.y > 0.12) {
+              s.position.y = targetY - 0.12; // Prevent front chassis clipping below fast uphill ramps
+            }
             s.verticalVelocity = 0;
             s.isGrounded = true;
+            const slopeDot = m.normalVec.z * Math.cos(s.rotationY) + m.normalVec.x * Math.sin(s.rotationY);
+            s.pitch = THREE.MathUtils.lerp(s.pitch, slopeDot * 0.85, 12.0 * dt);
+          } else {
+            // Airborne drop off quay/ramp or diving down toward water/riverbed
+            s.isGrounded = false;
+            s.verticalVelocity -= (s.isInWater ? 11.0 : 24.0) * dt;
+            if (s.isInWater) s.verticalVelocity *= Math.exp(-4.5 * dt);
+            s.position.y += s.verticalVelocity * dt;
+            if (s.position.y <= targetY) {
+              s.position.y = targetY;
+              s.verticalVelocity = 0;
+              s.isGrounded = true;
+            }
           }
-        }
-      } else {
-        if (s.position.y > 0.0) {
+        } else {
+          // Free fall (no fake Y=0 floor clamp so car always falls smoothly onto sunken terrain or water)
           s.isGrounded = false;
-          s.verticalVelocity -= 22.0 * dt;
-          s.position.y = Math.max(0.0, s.position.y + s.verticalVelocity * dt);
+          s.verticalVelocity -= (s.isInWater ? 11.0 : 24.0) * dt;
+          if (s.isInWater) s.verticalVelocity *= Math.exp(-4.5 * dt);
+          s.position.y = Math.max(-12.0, s.position.y + s.verticalVelocity * dt);
         }
-        if (s.position.y <= 0.0) {
-          s.position.y = 0.0;
-          s.verticalVelocity = 0;
-          s.isGrounded = true;
+
+        // Hydrodynamic drag & wave rock while in Seine River water
+        if (s.isInWater) {
+          s.speed *= Math.exp(-2.8 * dt);
+          const maxWaterSpd = s.position.y < waterY - 0.65 ? 8.0 : 14.0;
+          if (s.speed > maxWaterSpd) s.speed = maxWaterSpd;
+          else if (s.speed < -6.0) s.speed = -6.0;
+          getWaterNormal(s.position.x, s.position.z, elapsed, m.waterNorm);
+          const wavePitch = m.waterNorm.z * Math.cos(s.rotationY) + m.waterNorm.x * Math.sin(s.rotationY);
+          const waveRoll = -m.waterNorm.x * Math.cos(s.rotationY) + m.waterNorm.z * Math.sin(s.rotationY);
+          s.pitch = THREE.MathUtils.lerp(s.pitch, wavePitch * 1.4, 5.0 * dt);
+          s.roll = THREE.MathUtils.lerp(s.roll, waveRoll * 1.4, 5.0 * dt);
+        } else {
+          s.roll = THREE.MathUtils.lerp(s.roll, 0, 8.0 * dt);
         }
       }
+    }
 
-      // Wall / Building collision
-      if (Math.abs(s.speed) > 2) {
+    // Shared Wall / Building Collision (skips high-altitude flying helicopters above buildings)
+    if (cityColliders.length > 0 && Math.abs(s.speed) > 2 && (!isHeli || s.position.y < 42)) {
+      const checkHeights = isBoat ? [0.85, 3.0, 4.85] : isHeli ? [1.2, 2.8] : [0.85];
+      const rayFar = isBoat || isHeli ? Math.max(2.6, (st.vehicleLength || 10.5) * 0.48) : 2.4;
+      const hitLimit = isBoat || isHeli ? Math.max(2.2, (st.vehicleLength || 10.5) * 0.44) : 2.0;
+
+      m.checkDir.copy(m.forwardVec);
+      if (s.speed < 0) m.checkDir.negate();
+      m.wallRaycaster.far = rayFar;
+
+      let resolvedWall = false;
+      for (let hi = 0; hi < checkHeights.length && !resolvedWall; hi++) {
         m.wallOrigin.copy(s.position);
-        m.wallOrigin.y += 0.85;
-        m.checkDir.copy(m.forwardVec);
-        if (s.speed < 0) m.checkDir.negate();
-
+        m.wallOrigin.y += checkHeights[hi];
         m.wallRaycaster.set(m.wallOrigin, m.checkDir);
-        m.wallRaycaster.far = 2.4;
         m.wallHits.length = 0;
         m.wallRaycaster.intersectObjects(cityColliders, false, m.wallHits);
-        const wallHits = m.wallHits;
 
-        if (wallHits.length > 0 && wallHits[0].distance < 2.0) {
-          const hitNorm = wallHits[0].normal;
-          if (hitNorm && Math.abs(hitNorm.y) < 0.55) {
-            const dot = m.checkDir.dot(hitNorm);
+        for (let i = 0; i < m.wallHits.length; i++) {
+          const wh = m.wallHits[i];
+          if (wh.distance >= hitLimit) break;
+          const rawN = wh.normal || wh.face?.normal;
+          if (!rawN) continue;
+          m.tmpNorm.copy(rawN).transformDirection(wh.object.matrixWorld);
+          if (Math.abs(m.tmpNorm.y) < 0.45) {
+            const dot = m.checkDir.dot(m.tmpNorm);
             if (dot < -0.65) {
               soundManager.playCrash(Math.abs(s.speed) / 25);
               s.speed = -s.speed * 0.25;
-              s.position.x += hitNorm.x * 0.35;
-              s.position.z += hitNorm.z * 0.35;
+              s.position.x += m.tmpNorm.x * 0.45;
+              s.position.z += m.tmpNorm.z * 0.45;
             } else {
               soundManager.playCrash(Math.abs(s.speed) / 50);
               s.speed *= 0.8;
-              s.position.x += hitNorm.x * 0.2;
-              s.position.z += hitNorm.z * 0.2;
+              s.position.x += m.tmpNorm.x * 0.25;
+              s.position.z += m.tmpNorm.z * 0.25;
             }
+            resolvedWall = true;
+            break;
           }
         }
       }
     }
 
-    // Unlocked open-world city boundaries
-    if (s.position.x < -800) { s.position.x = -795; s.speed = 0; }
-    if (s.position.x > 500) { s.position.x = 495; s.speed = 0; }
-    if (s.position.z < -900) { s.position.z = -895; s.speed = 0; }
-    if (s.position.z > 400) { s.position.z = 395; s.speed = 0; }
+    // Open-world boundaries (Boats stay inside Seine Harbor; cars roam City + Paris)
+    const minX = isBoat ? 342 : -750;
+    const maxX = isBoat ? WATER_ZONE.maxX - 12 : 1380;
+    const minZ = isBoat ? WATER_ZONE.minZ + 12 : -850;
+    const maxZ = isBoat ? WATER_ZONE.maxZ - 12 : 350;
+    if (s.position.x < minX) { s.position.x = minX + 1; s.speed = 0; }
+    if (s.position.x > maxX) { s.position.x = maxX - 1; s.speed = 0; }
+    if (s.position.z < minZ) { s.position.z = minZ + 1; s.speed = 0; }
+    if (s.position.z > maxZ) { s.position.z = maxZ - 1; s.speed = 0; }
 
     // Wheel rotation
     s.wheelRotation += (s.speed * dt / (2 * Math.PI * 0.36)) * Math.PI * 2;
@@ -481,35 +657,130 @@ export function Car() {
     }
     s.currentGear = gear;
 
-    // Apply Transforms to 3D Car Root
+    // Apply Transforms to 3D Car Root (includes slope pitch & water wave roll)
     if (carGroup.current) {
       carGroup.current.position.copy(s.position);
-      carGroup.current.rotation.set(s.pitch, s.rotationY, 0, 'YXZ');
+      carGroup.current.rotation.set(s.pitch, s.rotationY, s.roll, 'YXZ');
+    }
+
+    // Record last safe dry shoreline / road position for clean shore car-parking
+    if (!isBoat && !s.isInWater && s.isGrounded && s.position.y > WATER_SURFACE_Y + 0.14) {
+      lastDryPoseRef.current.pos[0] = s.position.x;
+      lastDryPoseRef.current.pos[1] = s.position.y;
+      lastDryPoseRef.current.pos[2] = s.position.z;
+      lastDryPoseRef.current.rotY = s.rotationY;
+      lastDryPoseRef.current.valid = true;
     }
 
     // Sound Engine Update
     soundManager.updateEngine(s.rpm, isDrivingForward, speedKmH);
-    soundManager.updateDrift(s.isDrifting, s.driftIntensity);
+    soundManager.updateDrift(s.isDrifting && !s.isInWater, s.driftIntensity);
     soundManager.updateNitro(s.isNitroActive);
 
     // Update Store Telemetry directly (Zero GC heap churn)
-    const st = useGameStore.getState();
     st.carPosition[0] = s.position.x;
     st.carPosition[1] = s.position.y;
     st.carPosition[2] = s.position.z;
     st.speed = Math.round(speedKmH);
     st.rpm = Math.round(s.rpm);
-    st.gear = String(s.currentGear);
+    st.gear = isHeli ? `${Math.max(0, Math.round(s.position.y))}M` : String(s.currentGear);
     st.steerAngle = s.steerAngle;
     st.nitro = Math.round(s.nitro);
     st.isNitroActive = s.isNitroActive;
     st.isDrifting = s.isDrifting;
     st.driftScore = s.driftScore;
     st.carRotation = s.rotationY;
+    st.isInWater = s.isInWater;
+
+    // Unified Proximity Seamless Vehicle Switching (Car <-> Boats & Helicopters)
+    const nowMs = performance.now();
+    const lock = st.switchLock;
+    if (!isBoat && !isHeli && !st.raceActive) {
+      const candidates = [...st.dockedBoats, ...st.dockedHelicopters];
+      let closest = null;
+      let closestDist = Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        const v = candidates[i];
+        if (Math.abs(s.position.y - v.position[1]) > 7.0) continue;
+        const d = Math.hypot(s.position.x - v.position[0], s.position.z - v.position[2]);
+        if (d < closestDist) {
+          closestDist = d;
+          closest = v;
+        }
+      }
+
+      if (lock.blockedBoatId) {
+        const blocked = candidates.find((v) => v.id === lock.blockedBoatId);
+        const bd = blocked ? Math.hypot(s.position.x - blocked.position[0], s.position.z - blocked.position[2]) : Infinity;
+        if (bd > (blocked?.boardRadius || 12) + 5.5) {
+          lock.blockedBoatId = null;
+        }
+      }
+
+      if (closest && closestDist <= 24) {
+        const useCurrent = !s.isInWater && s.position.y > WATER_SURFACE_Y + 0.14;
+        const parkSpot = useCurrent
+          ? [s.position.x, s.position.y, s.position.z]
+          : (lastDryPoseRef.current.valid ? [...lastDryPoseRef.current.pos] : [...closest.pierPark]);
+        const parkRot = useCurrent ? s.rotationY : (lastDryPoseRef.current.valid ? lastDryPoseRef.current.rotY : Math.PI * 0.5);
+        const kind = closest.vehicleType === 'helicopter' ? 'board_heli' : 'board_boat';
+
+        if (
+          closestDist <= closest.boardRadius &&
+          nowMs >= lock.cooldownUntil &&
+          lock.blockedBoatId !== closest.id
+        ) {
+          st.boardWorldVehicle(closest.vehicleType, closest.id, parkSpot, parkRot);
+        } else if (
+          st.nearbyPrompt?.kind !== kind ||
+          st.nearbyPrompt?.targetId !== closest.id
+        ) {
+          st.setNearbyPrompt({
+            kind,
+            vehicleType: closest.vehicleType,
+            targetId: closest.id,
+            label: closest.name,
+            carParkSpot: parkSpot,
+            carRotY: parkRot
+          });
+        } else {
+          st.nearbyPrompt.carParkSpot = parkSpot;
+          st.nearbyPrompt.carRotY = parkRot;
+        }
+      } else if (st.nearbyPrompt) {
+        st.setNearbyPrompt(null);
+      }
+    } else if ((isBoat || isHeli) && st.parkedCar) {
+      const distToCar = Math.hypot(
+        s.position.x - st.parkedCar.position[0],
+        s.position.z - st.parkedCar.position[2]
+      );
+      const dyToCar = Math.abs(s.position.y - st.parkedCar.position[1]);
+      if (!lock.armedCarReturn && distToCar > 18.0) {
+        lock.armedCarReturn = true;
+      }
+
+      const maxDyReturn = isHeli ? 2.2 : 4.5;
+      if (lock.armedCarReturn && nowMs >= lock.cooldownUntil && distToCar <= 13.5 && dyToCar < maxDyReturn) {
+        st.returnToParkedCar([s.position.x, isBoat ? WATER_SURFACE_Y : s.position.y, s.position.z], s.rotationY);
+      } else if (distToCar <= 24.0 && dyToCar < 9.0) {
+        if (st.nearbyPrompt?.kind !== 'return_car' || st.nearbyPrompt?.targetId !== st.parkedCar.carId) {
+          st.setNearbyPrompt({
+            kind: 'return_car',
+            targetId: st.parkedCar.carId,
+            label: st.parkedCar.name
+          });
+        }
+      } else if (st.nearbyPrompt) {
+        st.setNearbyPrompt(null);
+      }
+    } else if (st.nearbyPrompt) {
+      st.setNearbyPrompt(null);
+    }
   });
 
   return (
-    <group ref={carGroup} position={[SPAWN_POS.x, SPAWN_POS.y, SPAWN_POS.z]}>
+    <group ref={carGroup} position={[SPAWN_POS.x, SPAWN_POS.y, SPAWN_POS.z]} rotation={[0, SPAWN_ROT_Y, 0]}>
       <CarModel
         isBraking={state.current.isBraking}
         isNitroActive={state.current.isNitroActive}

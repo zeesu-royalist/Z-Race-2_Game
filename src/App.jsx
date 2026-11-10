@@ -37,15 +37,21 @@ export default function App() {
   }
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const fetchCars = useGameStore((s) => s.fetchCars);
+  const fetchBoats = useGameStore((s) => s.fetchBoats);
+  const fetchHelicopters = useGameStore((s) => s.fetchHelicopters);
   const syncCarsList = useGameStore((s) => s.syncCarsList);
+  const syncBoatsList = useGameStore((s) => s.syncBoatsList);
+  const syncHelicoptersList = useGameStore((s) => s.syncHelicoptersList);
 
   useEffect(() => {
     fetchCars();
+    fetchBoats();
+    fetchHelicopters();
 
     if (import.meta.hot) {
-      import.meta.hot.on('cars-updated', (updatedCars) => {
-        syncCarsList(updatedCars);
-      });
+      import.meta.hot.on('cars-updated', (updatedCars) => syncCarsList(updatedCars));
+      import.meta.hot.on('boats-updated', (updatedBoats) => syncBoatsList(updatedBoats));
+      import.meta.hot.on('helicopters-updated', (updatedHelis) => syncHelicoptersList(updatedHelis));
     }
 
     const updateTouch = () => {
@@ -89,7 +95,7 @@ export default function App() {
       events.forEach((evt) => window.removeEventListener(evt, handleUserInteraction));
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchCars, syncCarsList]);
+  }, [fetchCars, fetchBoats, syncCarsList, syncBoatsList]);
 
   return (
     <div className="game-viewport">

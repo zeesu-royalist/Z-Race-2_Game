@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { Zap, Flame, Timer, Trophy } from 'lucide-react';
+import { Zap, Flame, Timer, Trophy, Waves, Ship, Car, Fan } from 'lucide-react';
 
 const formatTime = (secs) => {
   const m = Math.floor(secs / 60);
@@ -15,6 +15,24 @@ export function SpeedometerHUD() {
   const currentCheckpoint = useGameStore((s) => s.currentCheckpoint);
   const totalCheckpoints = useGameStore((s) => s.totalCheckpoints);
   const raceFinished = useGameStore((s) => s.raceFinished);
+  const isInWater = useGameStore((s) => s.isInWater);
+  const nearbyPrompt = useGameStore((s) => s.nearbyPrompt);
+  const vehicleType = useGameStore((s) => s.vehicleType);
+  const triggerReset = useGameStore((s) => s.triggerReset);
+
+  const handleProximitySwitch = () => {
+    const st = useGameStore.getState();
+    if (nearbyPrompt?.kind === 'board_boat' || nearbyPrompt?.kind === 'board_heli') {
+      st.boardWorldVehicle(
+        nearbyPrompt.vehicleType || (nearbyPrompt.kind === 'board_heli' ? 'helicopter' : 'boat'),
+        nearbyPrompt.targetId,
+        nearbyPrompt.carParkSpot || st.carPosition,
+        nearbyPrompt.carRotY ?? st.carRotation
+      );
+    } else if (nearbyPrompt?.kind === 'return_car') {
+      st.returnToParkedCar(st.carPosition, st.carRotation);
+    }
+  };
 
   const speedRef = useRef(null);
   const gearRef = useRef(null);
@@ -111,14 +129,44 @@ export function SpeedometerHUD() {
         </div>
       )}
 
+      {/* Proximity Auto / Instant Switch Prompt (Car <-> Boats & Helicopters) */}
+      {nearbyPrompt && (
+        <button
+          type="button"
+          className={`proximity-switch-pill ${nearbyPrompt.kind === 'return_car' ? 'is-car-return' : ''}`}
+          onClick={handleProximitySwitch}
+        >
+          {nearbyPrompt.kind === 'return_car' ? (
+            <Car size={16} />
+          ) : nearbyPrompt.kind === 'board_heli' ? (
+            <Fan size={16} />
+          ) : (
+            <Ship size={16} />
+          )}
+          <span>
+            {nearbyPrompt.kind === 'return_car'
+              ? `PARKED CAR NEARBY (${nearbyPrompt.label.toUpperCase()}) — APPROACH OR TAP / [E]`
+              : `${nearbyPrompt.kind === 'board_heli' ? 'HELIPAD' : 'DOCKED'} ${nearbyPrompt.label.toUpperCase()} — APPROACH OR TAP / [E]`}
+          </span>
+        </button>
+      )}
+
+      {/* Water Submersion Alert + Quick Recovery */}
+      {isInWater && !nearbyPrompt && (
+        <button type="button" className="water-alert-pill" onClick={triggerReset}>
+          <Waves size={16} />
+          <span>IN WATER — TAP OR PRESS [R] TO RESPAWN ON ROAD</span>
+        </button>
+      )}
+
       {/* SPEEDOMETER CLUSTER (Top-Right, Minimal Cyber Blade) */}
       <div className="speedometer-cluster">
         <div className="cyber-hud-topline" />
 
-        {/* Speed & Gear */}
+        {/* Speed & Gear / Altitude */}
         <div className="cyber-hud-main">
           <div className="cyber-gear-box">
-            <span className="cyber-gear-label">GEAR</span>
+            <span className="cyber-gear-label">{vehicleType === 'helicopter' ? 'ALT' : 'GEAR'}</span>
             <span ref={gearRef} className="cyber-gear-val">1</span>
           </div>
           <div className="cyber-speed-group">

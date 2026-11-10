@@ -2,10 +2,14 @@
   {
     "id": "1993_toyota_supra_turbo_mk_iv_versus_2f2f",
     "fileName": "1993_toyota_supra_turbo_mk_iv_versus_2f2f.glb",
+    "vehicleType": "car",
     "name": "1993 Toyota Supra Mk IV Turbo (2F2F)",
     "modelPath": "/cars-models/1993_toyota_supra_turbo_mk_iv_versus_2f2f.glb",
     "brand": "Toyota",
     "category": "JDM Legend",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "340 KM/H",
       "acceleration": "3.4 SEC",
@@ -22,10 +26,14 @@
   {
     "id": "2017_lamborghini_terzo_millennio",
     "fileName": "2017_lamborghini_terzo_millennio.glb",
+    "vehicleType": "car",
     "name": "2017 Lamborghini Terzo Millennio",
     "modelPath": "/cars-models/2017_lamborghini_terzo_millennio.glb",
     "brand": "Lamborghini",
     "category": "Hyper-EV Concept",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "380 KM/H",
       "acceleration": "2.1 SEC",
@@ -42,10 +50,14 @@
   {
     "id": "2020_dodge_challenger_srt_super_stock",
     "fileName": "2020_dodge_challenger_srt_super_stock.glb",
+    "vehicleType": "car",
     "name": "2020 Dodge Challenger SRT Super Stock",
     "modelPath": "/cars-models/2020_dodge_challenger_srt_super_stock.glb",
     "brand": "Dodge",
     "category": "American Muscle",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "326 KM/H",
       "acceleration": "3.2 SEC",
@@ -62,10 +74,14 @@
   {
     "id": "2026_lamborghini_fenomeno",
     "fileName": "2026_lamborghini_fenomeno.glb",
+    "vehicleType": "car",
     "name": "2026 Lamborghini Fenomeno",
     "modelPath": "/cars-models/2026_lamborghini_fenomeno.glb",
     "brand": "Lamborghini",
     "category": "Vision Hypercar",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "395 KM/H",
       "acceleration": "2.3 SEC",
@@ -82,10 +98,14 @@
   {
     "id": "2027_tushek_aeon_e",
     "fileName": "2027_tushek_aeon_e.glb",
+    "vehicleType": "car",
     "name": "2027 Tushek Aeon E",
     "modelPath": "/cars-models/2027_tushek_aeon_e.glb",
     "brand": "Tushek",
     "category": "Hyper Hybrid Titan",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "410 KM/H",
       "acceleration": "2.0 SEC",
@@ -102,10 +122,14 @@
   {
     "id": "alfa_romeo_t332_long_tail_1968__www-vecarz-com",
     "fileName": "alfa_romeo_t332_long_tail_1968__www.vecarz.com.glb",
+    "vehicleType": "car",
     "name": "Alfa Romeo T332 Long Tail 1968 Www.Vecarz.Com",
     "modelPath": "/cars-models/alfa_romeo_t332_long_tail_1968__www.vecarz.com.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",
@@ -122,10 +146,14 @@
   {
     "id": "audi_r8_lms",
     "fileName": "audi_r8_lms.glb",
+    "vehicleType": "car",
     "name": "Audi R8 Lms",
     "modelPath": "/cars-models/audi_r8_lms.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",
@@ -142,10 +170,14 @@
   {
     "id": "bmw_m4_f82_razor_2014__www-vecarz-com",
     "fileName": "bmw_m4_f82_razor_2014__www.vecarz.com.glb",
+    "vehicleType": "car",
     "name": "BMW M4 F82 Razor Edition",
     "modelPath": "/cars-models/bmw_m4_f82_razor_2014__www.vecarz.com.glb",
     "brand": "BMW M Power",
     "category": "Track Spec Coupe",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "330 KM/H",
       "acceleration": "3.6 SEC",
@@ -162,10 +194,14 @@
   {
     "id": "bugatti_bolide_free_3d___low_poly_-_low_details",
     "fileName": "bugatti_bolide_free_3d___low_poly_-_low_details.glb",
+    "vehicleType": "car",
     "name": "Bugatti Bolide Free 3d Low Poly Low Details",
     "modelPath": "/cars-models/bugatti_bolide_free_3d___low_poly_-_low_details.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",
@@ -182,10 +218,14 @@
   {
     "id": "ferrari_488_pista_widebody",
     "fileName": "ferrari_488_pista_widebody.glb",
+    "vehicleType": "car",
     "name": "Ferrari 488 Pista Widebody",
     "modelPath": "/cars-models/ferrari_488_pista_widebody.glb",
     "brand": "Ferrari",
     "category": "Scuderia Widebody",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "345 KM/H",
       "acceleration": "2.8 SEC",
@@ -202,10 +242,14 @@
   {
     "id": "mclaren_spider",
     "fileName": "mclaren_spider.glb",
+    "vehicleType": "car",
     "name": "McLaren Spider GT",
     "modelPath": "/cars-models/mclaren_spider.glb",
     "brand": "McLaren",
     "category": "Open-Top Hypercar",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "341 KM/H",
       "acceleration": "2.9 SEC",
@@ -222,10 +266,14 @@
   {
     "id": "mclaren_ultimate_vision_gt",
     "fileName": "mclaren_ultimate_vision_gt.glb",
+    "vehicleType": "car",
     "name": "Mclaren Ultimate Vision Gt",
     "modelPath": "/cars-models/mclaren_ultimate_vision_gt.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",
@@ -242,10 +290,14 @@
   {
     "id": "mercedes_sls_gt3",
     "fileName": "mercedes_sls_gt3.glb",
+    "vehicleType": "car",
     "name": "Mercedes Sls Gt3",
     "modelPath": "/cars-models/mercedes_sls_gt3.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",
@@ -262,10 +314,14 @@
   {
     "id": "porsche_911",
     "fileName": "porsche_911.glb",
+    "vehicleType": "car",
     "name": "Porsche 911",
     "modelPath": "/cars-models/porsche_911.glb",
     "brand": "Custom Garage",
     "category": "Imported Racer",
+    "targetLength": 3.9,
+    "waterlineOffset": 0,
+    "camScale": 1,
     "specs": {
       "topSpeed": "350 KM/H",
       "acceleration": "2.8 SEC",

@@ -858,6 +858,48 @@ html, body, #root {
   color: #ffffff;
 }
 
+.garage-tabs {
+  display: flex;
+  gap: 10px;
+  padding: 12px 26px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 16, 26, 0.55);
+  flex-shrink: 0;
+}
+
+.garage-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9bb0c9;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.garage-tab:hover {
+  color: #ffffff;
+  border-color: rgba(0, 240, 255, 0.45);
+}
+
+.garage-tab-active {
+  color: #041521;
+  background: linear-gradient(135deg, #00f0ff, #38bdf8);
+  border-color: rgba(0, 240, 255, 0.9);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.32);
+}
+
+.garage-tab-active:hover {
+  color: #041521;
+}
+
 .modal-body {
   padding: 24px 26px;
   overflow-y: auto;
@@ -1525,6 +1567,19 @@ html, body, #root {
   .auto-sync-banner {
     display: none;
   }
+  .garage-tabs {
+    padding: 6px 12px;
+    gap: 6px;
+  }
+  .garage-tab {
+    padding: 5px 10px;
+    font-size: 9px;
+    gap: 5px;
+  }
+  .garage-tab svg {
+    width: 12px;
+    height: 12px;
+  }
   .modal-body {
     padding: 8px 12px;
     gap: 8px;
@@ -1596,5 +1651,49 @@ html, body, #root {
     padding: 5px 12px;
     font-size: 9.5px;
     border-radius: 8px;
+  }
+}
+
+/* ===== WATER SUBMERSION & PROXIMITY VEHICLE SWITCH PILL ===== */
+.water-alert-pill,
+.proximity-switch-pill {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(6, 38, 56, 0.90);
+  border: 1px solid rgba(0, 240, 255, 0.55);
+  color: #b8f5ff;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 22px rgba(0, 200, 255, 0.35);
+  z-index: 50;
+}
+
+.proximity-switch-pill.is-car-return {
+  background: rgba(6, 46, 34, 0.90);
+  border-color: rgba(16, 185, 129, 0.65);
+  color: #a7f3d0;
+  box-shadow: 0 0 22px rgba(16, 185, 129, 0.35);
+}
+
+@media (max-height: 520px), (max-width: 900px) {
+  .water-alert-pill,
+  .proximity-switch-pill {
+    top: 44px;
+    padding: 5px 12px;
+    font-size: 8.5px;
+    gap: 5px;
+    white-space: nowrap;
   }
 }

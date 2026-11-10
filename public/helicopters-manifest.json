@@ -1,0 +1,50 @@
+[
+  {
+    "id": "helicopter",
+    "fileName": "helicopter.glb",
+    "vehicleType": "helicopter",
+    "name": "Paris Eurocopter EC135",
+    "modelPath": "/Helicopters/helicopter.glb",
+    "brand": "Airbus Heli",
+    "category": "Twin-Turbine Rotorcraft",
+    "targetLength": 10.6,
+    "waterlineOffset": 0,
+    "camScale": 2.3,
+    "specs": {
+      "topSpeed": "255 KM/H",
+      "acceleration": "1.9 SEC",
+      "power": "1340 SHP",
+      "handling": "TWIN TURBINE"
+    },
+    "tuning": {
+      "maxSpeed": 62,
+      "accelRate": 22,
+      "climbRate": 16,
+      "turnMultiplier": 1.25
+    }
+  },
+  {
+    "id": "sh-60b_seahawk_helicopter",
+    "fileName": "sh-60b_seahawk_helicopter.glb",
+    "vehicleType": "helicopter",
+    "name": "Sikorsky SH-60B Seahawk",
+    "modelPath": "/Helicopters/sh-60b_seahawk_helicopter.glb",
+    "brand": "Sikorsky Aero",
+    "category": "Naval Twin-Rotor Hawk",
+    "targetLength": 14.8,
+    "waterlineOffset": 0,
+    "camScale": 3.1,
+    "specs": {
+      "topSpeed": "275 KM/H",
+      "acceleration": "2.2 SEC",
+      "power": "3800 SHP",
+      "handling": "NAVAL HAWK"
+    },
+    "tuning": {
+      "maxSpeed": 68,
+      "accelRate": 20,
+      "climbRate": 15,
+      "turnMultiplier": 1.05
+    }
+  }
+]

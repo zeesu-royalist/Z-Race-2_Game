@@ -32,7 +32,15 @@
       "destination": "/cars-manifest.json"
     },
     {
-      "source": "/((?!assets/|cars-models/|city-models/|cars-manifest.json|.*\\..*).*)",
+      "source": "/api/boats",
+      "destination": "/boats-manifest.json"
+    },
+    {
+      "source": "/api/helicopters",
+      "destination": "/helicopters-manifest.json"
+    },
+    {
+      "source": "/((?!assets/|cars-models/|boats/|Helicopters/|npc/|city-models/|cars-manifest.json|boats-manifest.json|helicopters-manifest.json|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]

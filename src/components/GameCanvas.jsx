@@ -6,6 +6,8 @@ import { useGameStore } from '../store/gameStore';
 import { CityMap } from './CityMap';
 import { Car } from './Car';
 import { RivalCars } from './RivalCars';
+import { DockedBoats } from './DockedBoats';
+import { CityCrowds } from './CityCrowds';
 import { CameraRig } from './CameraRig';
 import { RacingSystem } from './RacingSystem';
 import { TireSkidmarks } from './TireSkidmarks';
@@ -43,7 +45,7 @@ function EnvironmentLights() {
           shadow-bias={-0.0003}
         />
         <hemisphereLight skyColor="#ff9955" groundColor="#332211" intensity={0.7} />
-        <fog attach="fog" args={['#a85c42', 100, 480]} />
+        <fog attach="fog" args={['#a85c42', 180, 920]} />
         <Environment preset="sunset" environmentIntensity={0.8} />
       </>
     );
@@ -69,7 +71,7 @@ function EnvironmentLights() {
           shadow-bias={-0.0003}
         />
         <hemisphereLight skyColor="#0c1626" groundColor="#050608" intensity={0.4} />
-        <fog attach="fog" args={['#070a12', 80, 450]} />
+        <fog attach="fog" args={['#070a12', 150, 860]} />
         <Environment preset="night" environmentIntensity={0.5} />
       </>
     );
@@ -102,7 +104,7 @@ function EnvironmentLights() {
         shadow-bias={-0.0003}
       />
       <hemisphereLight skyColor="#87ceeb" groundColor="#3a4042" intensity={0.7} />
-      <fog attach="fog" args={['#b8d8ea', 120, 500]} />
+      <fog attach="fog" args={['#b8d8ea', 200, 960]} />
       <Environment preset="city" environmentIntensity={0.85} />
     </>
   );
@@ -129,7 +131,7 @@ export function GameCanvas() {
       resize={{ offsetSize: true }}
       shadows={{ type: THREE.BasicShadowMap }}
       dpr={1}
-      camera={{ position: [10, 5, -20], fov: 62, near: 0.2, far: 500 }}
+      camera={{ position: [390.53, 1.8, -36.45], fov: 62, near: 0.2, far: 1200 }}
       gl={{
         antialias: true,
         stencil: false,
@@ -146,6 +148,8 @@ export function GameCanvas() {
         <TireSkidmarks />
         <Car />
         <RivalCars />
+        <DockedBoats />
+        <CityCrowds />
         <RacingSystem />
       </Suspense>
       <CameraRig />

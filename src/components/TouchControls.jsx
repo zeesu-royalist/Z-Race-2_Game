@@ -1,9 +1,13 @@
 import React, { useCallback } from 'react';
 import { inputState } from './Car';
+import { useGameStore } from '../store/gameStore';
 import { soundManager } from '../utils/AudioSystem';
 import { ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Zap, Disc } from 'lucide-react';
 
 export function TouchControls() {
+  const vehicleType = useGameStore((s) => s.vehicleType);
+  const isHeli = vehicleType === 'helicopter';
+
   const handleTouch = useCallback((key, active, e) => {
     if (e && e.cancelable) e.preventDefault();
     soundManager.init();
@@ -40,16 +44,21 @@ export function TouchControls() {
         </button>
       </div>
 
-      {/* Right side: Pedals, Handbrake, Boost */}
+      {/* Right side: Pedals, Climb/Land or Handbrake/Boost */}
       <div className="touch-pedals-group">
         <div className="touch-aux-row">
-          <button type="button" className="touch-btn aux-btn handbrake-btn" {...touchProps('handbrake')} aria-label="Handbrake">
-            <Disc size={16} />
-            <span>DRIFT</span>
+          <button type="button" className="touch-btn aux-btn handbrake-btn" {...touchProps('handbrake')} aria-label={isHeli ? 'Climb Up' : 'Handbrake'}>
+            {isHeli ? <ArrowUp size={16} /> : <Disc size={16} />}
+            <span>{isHeli ? 'CLIMB' : 'DRIFT'}</span>
           </button>
-          <button type="button" className="touch-btn aux-btn boost-btn" {...touchProps('nitro')} aria-label="Nitro Boost">
-            <Zap size={16} />
-            <span>NITRO</span>
+          <button
+            type="button"
+            className="touch-btn aux-btn boost-btn"
+            {...touchProps(isHeli ? 'descend' : 'nitro')}
+            aria-label={isHeli ? 'Descend Down' : 'Nitro Boost'}
+          >
+            {isHeli ? <ArrowDown size={16} /> : <Zap size={16} />}
+            <span>{isHeli ? 'DOWN' : 'NITRO'}</span>
           </button>
         </div>
 

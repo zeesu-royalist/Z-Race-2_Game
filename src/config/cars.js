@@ -234,3 +234,81 @@ export const CAR_CATALOG = [
 ];
 
 export const DEFAULT_CAR_ID = 'toyota-supra-mk4';
+
+// Watercraft & Ships Catalog (from public/boats/)
+export const BOAT_CATALOG = [
+  {
+    id: 'boat',
+    fileName: 'boat.glb',
+    vehicleType: 'boat',
+    name: 'Paris Horizon Yacht Cruiser',
+    modelPath: '/boats/boat.glb',
+    brand: 'Riva Marine',
+    category: 'Luxury Speedboat',
+    targetLength: 10.5,
+    waterlineOffset: 0.16,
+    camScale: 2.3,
+    specs: { topSpeed: '115 KM/H', acceleration: '3.6 SEC', handling: 'HYDRO JET', power: '1400 BHP' },
+    tuning: { maxSpeed: 34, accelRate: 14, gripFactor: 0.85, turnMultiplier: 1.05 }
+  },
+  {
+    id: 'tow_boat',
+    fileName: 'tow_boat.glb',
+    vehicleType: 'boat',
+    name: 'Seine Harbor Tugboat',
+    modelPath: '/boats/tow_boat.glb',
+    brand: 'Paris Port',
+    category: 'Heavy Tug Vessel',
+    targetLength: 11.2,
+    waterlineOffset: 0.18,
+    camScale: 2.4,
+    specs: { topSpeed: '82 KM/H', acceleration: '4.9 SEC', handling: 'TWIN PROP', power: '2600 BHP' },
+    tuning: { maxSpeed: 24, accelRate: 10, gripFactor: 0.90, turnMultiplier: 0.85 }
+  },
+  {
+    id: 'aquitaine_-_french_ship',
+    fileName: 'aquitaine_-_french_ship.glb',
+    vehicleType: 'boat',
+    name: 'FS Aquitaine (D650) Frigate',
+    modelPath: '/boats/aquitaine_-_french_ship.glb',
+    brand: 'Marine Nationale',
+    category: 'French Naval Warship',
+    targetLength: 24.0,
+    waterlineOffset: 0.22,
+    camScale: 4.3,
+    specs: { topSpeed: '105 KM/H', acceleration: '4.4 SEC', handling: 'TURBINE SHIP', power: '32 MW' },
+    tuning: { maxSpeed: 30, accelRate: 11, gripFactor: 0.82, turnMultiplier: 0.72 }
+  }
+];
+
+// Helicopters Catalog (from public/Helicopters/)
+export const HELI_CATALOG = [
+  {
+    id: 'helicopter',
+    fileName: 'helicopter.glb',
+    vehicleType: 'helicopter',
+    name: 'Paris Eurocopter EC135',
+    modelPath: '/Helicopters/helicopter.glb',
+    brand: 'Airbus Heli',
+    category: 'Twin-Turbine Rotorcraft',
+    targetLength: 10.6,
+    waterlineOffset: 0,
+    camScale: 2.3,
+    specs: { topSpeed: '255 KM/H', acceleration: '1.9 SEC', handling: 'TWIN TURBINE', power: '1340 SHP' },
+    tuning: { maxSpeed: 62, accelRate: 22, climbRate: 16, turnMultiplier: 1.25 }
+  },
+  {
+    id: 'sh-60b_seahawk_helicopter',
+    fileName: 'sh-60b_seahawk_helicopter.glb',
+    vehicleType: 'helicopter',
+    name: 'Sikorsky SH-60B Seahawk',
+    modelPath: '/Helicopters/sh-60b_seahawk_helicopter.glb',
+    brand: 'Sikorsky Aero',
+    category: 'Naval Twin-Rotor Hawk',
+    targetLength: 14.8,
+    waterlineOffset: 0,
+    camScale: 3.1,
+    specs: { topSpeed: '275 KM/H', acceleration: '2.2 SEC', handling: 'NAVAL HAWK', power: '3800 SHP' },
+    tuning: { maxSpeed: 68, accelRate: 20, climbRate: 15, turnMultiplier: 1.05 }
+  }
+];
