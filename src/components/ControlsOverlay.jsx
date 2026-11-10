@@ -102,7 +102,7 @@ export function ControlsOverlay() {
             title={`Switch Vehicle / Boat / Helicopter (${carName})`}
           >
             {vehicleType === 'helicopter' ? <Fan size={16} /> : vehicleType === 'boat' ? <Ship size={16} /> : <Car size={16} />}
-            <span>{(carBrand || 'TOYOTA').toUpperCase()}</span>
+            <span>{(carBrand || 'MCLAREN').toUpperCase()}</span>
           </button>
 
           {/* Fast Travel between Districts / Harbor Zones */}

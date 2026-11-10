@@ -1,6 +1,27 @@
 // Universal Cars Catalog with All 11 Supercars
 export const CAR_CATALOG = [
   {
+    id: 'mclaren_ultimate_vision_gt',
+    fileName: 'mclaren_ultimate_vision_gt.glb',
+    name: 'McLaren Ultimate Vision GT',
+    modelPath: '/cars-models/mclaren_ultimate_vision_gt.glb',
+    brand: 'McLaren',
+    category: 'Vision GT Hypercar',
+    description: 'Futuristic lightweight carbon-fiber McLaren Vision Gran Turismo prototype with 1150 PS hybrid AWD torque.',
+    specs: {
+      topSpeed: '390 KM/H',
+      acceleration: '2.2 SEC',
+      handling: 'AWD AERO',
+      power: '1150 BHP'
+    },
+    tuning: {
+      maxSpeed: 72,
+      accelRate: 24,
+      gripFactor: 0.95,
+      turnMultiplier: 1.15
+    }
+  },
+  {
     id: 'toyota-supra-mk4',
     fileName: '1993_toyota_supra_turbo_mk_iv_versus_2f2f.glb',
     name: '1993 Toyota Supra Mk IV Turbo (2F2F)',
@@ -233,7 +254,7 @@ export const CAR_CATALOG = [
   }
 ];
 
-export const DEFAULT_CAR_ID = 'toyota-supra-mk4';
+export const DEFAULT_CAR_ID = 'mclaren_ultimate_vision_gt';
 
 // Watercraft & Ships Catalog (from public/boats/)
 export const BOAT_CATALOG = [

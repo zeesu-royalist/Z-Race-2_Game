@@ -23,7 +23,7 @@ function LoadingOverlay() {
     <div className="game-loading-overlay">
       <div className="loading-card">
         <div className="loading-spinner" />
-        <div className="loading-title">CAR IS LOADING...</div>
+        <div className="loading-title">WAIT A SECOND...</div>
         <div className="loading-subtitle">{Math.round(progress)}%</div>
       </div>
     </div>

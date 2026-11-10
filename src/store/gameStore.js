@@ -126,7 +126,7 @@ export const useGameStore = create((set, get) => ({
   currentCarId: defaultCar.id,
   carModelPath: defaultCar.modelPath,
   carName: defaultCar.name,
-  carBrand: defaultCar.brand || 'Toyota',
+  carBrand: defaultCar.brand || 'McLaren',
   carTuning: defaultCar.tuning,
 
   // Car Telemetry

@@ -15,6 +15,13 @@ function cleanFileName(fileName) {
 
 // Known curated car presets
 const CURATED_CARS = {
+  'mclaren_ultimate_vision_gt.glb': {
+    name: 'McLaren Ultimate Vision GT',
+    brand: 'McLaren',
+    category: 'Vision GT Hypercar',
+    specs: { topSpeed: '390 KM/H', acceleration: '2.2 SEC', power: '1150 BHP', handling: 'AWD AERO' },
+    tuning: { maxSpeed: 72, accelRate: 24, gripFactor: 0.95, turnMultiplier: 1.15 }
+  },
   '1993_toyota_supra_turbo_mk_iv_versus_2f2f.glb': {
     name: '1993 Toyota Supra Mk IV Turbo (2F2F)',
     brand: 'Toyota',

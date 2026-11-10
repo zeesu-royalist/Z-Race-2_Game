@@ -267,24 +267,24 @@
     "id": "mclaren_ultimate_vision_gt",
     "fileName": "mclaren_ultimate_vision_gt.glb",
     "vehicleType": "car",
-    "name": "Mclaren Ultimate Vision Gt",
+    "name": "McLaren Ultimate Vision GT",
     "modelPath": "/cars-models/mclaren_ultimate_vision_gt.glb",
-    "brand": "Custom Garage",
-    "category": "Imported Racer",
+    "brand": "McLaren",
+    "category": "Vision GT Hypercar",
     "targetLength": 3.9,
     "waterlineOffset": 0,
     "camScale": 1,
     "specs": {
-      "topSpeed": "350 KM/H",
-      "acceleration": "2.8 SEC",
-      "power": "720 BHP",
-      "handling": "CUSTOM AWD"
+      "topSpeed": "390 KM/H",
+      "acceleration": "2.2 SEC",
+      "power": "1150 BHP",
+      "handling": "AWD AERO"
     },
     "tuning": {
-      "maxSpeed": 66,
-      "accelRate": 22,
-      "gripFactor": 0.9,
-      "turnMultiplier": 1.1
+      "maxSpeed": 72,
+      "accelRate": 24,
+      "gripFactor": 0.95,
+      "turnMultiplier": 1.15
     }
   },
   {
