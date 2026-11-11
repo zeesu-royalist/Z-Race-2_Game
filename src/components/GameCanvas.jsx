@@ -12,18 +12,20 @@ import { CameraRig } from './CameraRig';
 import { RacingSystem } from './RacingSystem';
 import { TireSkidmarks } from './TireSkidmarks';
 
-const IS_MOBILE_GPU =
-  typeof window !== 'undefined' &&
-  (window.matchMedia?.('(pointer: coarse)').matches || /Mobi|Android/i.test(navigator.userAgent));
+const SHADOW_MAP_SIZE = [512, 512];
 
-const SHADOW_SIZE = IS_MOBILE_GPU ? 256 : 512;
-const SHADOW_MAP_SIZE = [SHADOW_SIZE, SHADOW_SIZE];
+// On high-DPI compact mobile viewports (e.g. 844x390), dpr=1 upscales 9x on 3x screens and pixelates NPCs/edges;
+// capping mobile DPR at [1, 2] yields ~1.3MP (still below 1080p desktop) with crisp anti-aliased edges.
+const CANVAS_DPR =
+  typeof window !== 'undefined' && Math.min(window.innerWidth, window.innerHeight) <= 600
+    ? [1, 2]
+    : 1;
 
 const RESIZE_CONFIG = { offsetSize: true };
-const SHADOW_CONFIG = { type: THREE.BasicShadowMap };
+const SHADOW_CONFIG = { type: THREE.PCFShadowMap };
 const CAMERA_CONFIG = { position: [390.53, 1.8, -36.45], fov: 62, near: 0.2, far: 1200 };
 const GL_CONFIG = {
-  antialias: !IS_MOBILE_GPU,
+  antialias: true,
   stencil: false,
   alpha: false,
   powerPreference: 'high-performance',
@@ -161,7 +163,7 @@ export function GameCanvas() {
       frameloop={isVisible ? 'always' : 'never'}
       resize={RESIZE_CONFIG}
       shadows={SHADOW_CONFIG}
-      dpr={1}
+      dpr={CANVAS_DPR}
       camera={CAMERA_CONFIG}
       gl={GL_CONFIG}
       onCreated={handleCreated}
