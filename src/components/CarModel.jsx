@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
@@ -146,18 +146,26 @@ function customizeAquitaineFrigate(wrapper) {
   if (!meshes.length) return;
 
   const invS = 1 / Math.max(0.01, wrapper.scale.x);
-  const { hullMat, decalMat, portGeo, stbdGeo } = getShipCustomAssets(origTex, meshes, invS);
+  const assets = getShipCustomAssets(origTex, meshes, invS);
+  const { hullMat, decalMat, portGeo, stbdGeo } = assets;
+  const untexturedCache = assets.untextured || (assets.untextured = new Map());
 
-  meshes.forEach((m) => {
+  for (let i = 0; i < meshes.length; i++) {
+    const m = meshes[i];
     if (m.material?.map) {
       m.material = hullMat;
     } else if (m.material) {
-      m.material = m.material.clone();
-      m.material.color.multiplyScalar(0.62);
-      m.material.roughness = 0.72;
-      m.material.metalness = 0.14;
+      let cloned = untexturedCache.get(m.material.uuid);
+      if (!cloned) {
+        cloned = m.material.clone();
+        cloned.color.multiplyScalar(0.62);
+        cloned.roughness = 0.72;
+        cloned.metalness = 0.14;
+        untexturedCache.set(m.material.uuid, cloned);
+      }
+      m.material = cloned;
     }
-  });
+  }
 
   wrapper.add(new THREE.Mesh(portGeo, decalMat), new THREE.Mesh(stbdGeo, decalMat));
 }
@@ -174,6 +182,13 @@ export const KNOWN_ORIENTATIONS = {
   'axis_fighter_plane.glb': [0, -Math.PI / 2, 0],
   'stylized_war_plane.glb': [0, 0, 0]
 };
+
+const _scratchBox = new THREE.Box3();
+const _scratchV1 = new THREE.Vector3();
+const _scratchV2 = new THREE.Vector3();
+const _scratchV3 = new THREE.Vector3();
+const _scratchMat = new THREE.Matrix4();
+let _seahawkTailCache = null;
 
 export function spinRotors(rotors, speedRad, dt) {
   if (!rotors || rotors.length === 0) return;
@@ -205,7 +220,6 @@ function setupHelicopterRotors(root, fileName) {
     const HUB = [2.4, 422, 257];
     const rotorGroup = new THREE.Group();
     rotorGroup.position.set(HUB[0], HUB[1], HUB[2]);
-    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
     const shiftMat = new THREE.Matrix4().makeTranslation(-HUB[0], -HUB[1], -HUB[2]);
 
     root.traverse((child) => {
@@ -220,23 +234,24 @@ function setupHelicopterRotors(root, fileName) {
         const i0 = idx ? idx.getX(t * 3) : t * 3;
         const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
         const i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
-        vA.fromBufferAttribute(pos, i0).applyMatrix4(child.matrixWorld);
-        vB.fromBufferAttribute(pos, i1).applyMatrix4(child.matrixWorld);
-        vC.fromBufferAttribute(pos, i2).applyMatrix4(child.matrixWorld);
-        const cy = (vA.y + vB.y + vC.y) / 3;
-        const cz = (vA.z + vB.z + vC.z) / 3;
+        _scratchV1.fromBufferAttribute(pos, i0).applyMatrix4(child.matrixWorld);
+        _scratchV2.fromBufferAttribute(pos, i1).applyMatrix4(child.matrixWorld);
+        _scratchV3.fromBufferAttribute(pos, i2).applyMatrix4(child.matrixWorld);
+        const cy = (_scratchV1.y + _scratchV2.y + _scratchV3.y) / 3;
+        const cz = (_scratchV1.z + _scratchV2.z + _scratchV3.z) / 3;
         if (cy > 400 && cz > -620) rotorIdx.push(i0, i1, i2);
         else bodyIdx.push(i0, i1, i2);
       }
 
       if (rotorIdx.length > 0) {
-        const bodyGeo = child.geometry.clone();
+        const origGeo = child.geometry;
+        const bodyGeo = origGeo.clone();
         bodyGeo.setIndex(bodyIdx);
         child.geometry = bodyGeo;
 
-        const rGeo = child.geometry.clone();
+        const rGeo = origGeo.clone();
         rGeo.setIndex(rotorIdx);
-        rGeo.applyMatrix4(shiftMat.clone().multiply(child.matrixWorld));
+        rGeo.applyMatrix4(_scratchMat.multiplyMatrices(shiftMat, child.matrixWorld));
         rotorGroup.add(new THREE.Mesh(rGeo, child.material));
       }
     });
@@ -246,13 +261,16 @@ function setupHelicopterRotors(root, fileName) {
       rotors.push({ obj: rotorGroup, axis: 'y', speedMul: 1.0 });
     }
 
-    // Add matching spinning tail rotor assembly on the starboard tail pylon
+    if (!_seahawkTailCache) {
+      _seahawkTailCache = {
+        mat: new THREE.MeshStandardMaterial({ color: '#1f252d', roughness: 0.45, metalness: 0.55 }),
+        g1: new THREE.BoxGeometry(8, 220, 20),
+        g2: new THREE.BoxGeometry(8, 20, 220)
+      };
+    }
     const tailGroup = new THREE.Group();
     tailGroup.position.set(34, 495, -915);
-    const bladeMat = new THREE.MeshStandardMaterial({ color: '#1f252d', roughness: 0.45, metalness: 0.55 });
-    const b1 = new THREE.Mesh(new THREE.BoxGeometry(8, 220, 20), bladeMat);
-    const b2 = new THREE.Mesh(new THREE.BoxGeometry(8, 20, 220), bladeMat);
-    tailGroup.add(b1, b2);
+    tailGroup.add(new THREE.Mesh(_seahawkTailCache.g1, _seahawkTailCache.mat), new THREE.Mesh(_seahawkTailCache.g2, _seahawkTailCache.mat));
     root.add(tailGroup);
     rotors.push({ obj: tailGroup, axis: 'x', speedMul: 2.5 });
     return rotors;
@@ -263,7 +281,6 @@ function setupHelicopterRotors(root, fileName) {
     root.traverse((child) => {
       if (child.isMesh && child.geometry && child.name === 'Object_17') propSources.push(child);
     });
-    const tmpV = new THREE.Vector3();
     propSources.forEach((child) => {
       const baseGeo = child.geometry.clone();
       baseGeo.applyMatrix4(child.matrixWorld);
@@ -282,15 +299,14 @@ function setupHelicopterRotors(root, fileName) {
       child.visible = false;
       [leftIdx, rightIdx].forEach((sideIdx) => {
         if (!sideIdx.length) return;
-        const box = new THREE.Box3();
-        for (let k = 0; k < sideIdx.length; k++) box.expandByPoint(tmpV.fromBufferAttribute(pos, sideIdx[k]));
-        const c = new THREE.Vector3();
-        box.getCenter(c);
+        _scratchBox.makeEmpty();
+        for (let k = 0; k < sideIdx.length; k++) _scratchBox.expandByPoint(_scratchV1.fromBufferAttribute(pos, sideIdx[k]));
+        _scratchBox.getCenter(_scratchV2);
         const sideGeo = baseGeo.clone();
         sideGeo.setIndex(sideIdx);
-        sideGeo.translate(-c.x, -c.y, -c.z);
+        sideGeo.translate(-_scratchV2.x, -_scratchV2.y, -_scratchV2.z);
         const propMesh = new THREE.Mesh(sideGeo, child.material);
-        propMesh.position.copy(c);
+        propMesh.position.copy(_scratchV2);
         root.add(propMesh);
         rotors.push({ obj: propMesh, axis: 'x', speedMul: 2.4 });
       });
@@ -304,7 +320,6 @@ function setupHelicopterRotors(root, fileName) {
       if ((node.name || '').toLowerCase() === 'fan_1') fanNode = node;
     });
     if (fanNode) {
-      // Align spin axis to the taildragger's tilted +14.7deg nose propeller shaft
       const shaftPivot = new THREE.Group();
       shaftPivot.position.set(0, 7.855, 12.7);
       shaftPivot.rotation.x = -0.256;
@@ -321,7 +336,7 @@ function setupHelicopterRotors(root, fileName) {
       });
       propMeshes.forEach((ch) => {
         const g = ch.geometry.clone();
-        g.applyMatrix4(invPivot.clone().multiply(ch.matrixWorld));
+        g.applyMatrix4(_scratchMat.multiplyMatrices(invPivot, ch.matrixWorld));
         spinGroup.add(new THREE.Mesh(g, ch.material));
         ch.visible = false;
       });
@@ -339,120 +354,113 @@ function setupHelicopterRotors(root, fileName) {
 
     const geo = centerGeometryOnMean(child);
     geo.computeBoundingBox();
-    const sz = new THREE.Vector3();
-    geo.boundingBox.getSize(sz);
-    const axis = sz.y <= sz.x && sz.y <= sz.z ? 'y' : (sz.x <= sz.z ? 'x' : 'z');
+    geo.boundingBox.getSize(_scratchV1);
+    const axis = _scratchV1.y <= _scratchV1.x && _scratchV1.y <= _scratchV1.z ? 'y' : (_scratchV1.x <= _scratchV1.z ? 'x' : 'z');
     rotors.push({ obj: child, axis, speedMul: isTail ? 2.4 : 1.0 });
   });
 
   return rotors;
 }
 
-// Zero-Allocation Reusable Instanced Wheel / Wake Emitter (tire smoke & water splash/wake)
+const _pDummy = new THREE.Object3D();
+const _zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0).setPosition(0, -999, 0);
+const MAX_EMITTER_PARTICLES = 35;
+
+// Zero-Allocation Reusable Instanced Wheel / Wake Emitter (skips work completely when idle)
 function WheelParticleEmitter({ mode = 'smoke' }) {
   const isWater = mode === 'water';
-  const maxParticles = 35;
   const meshRef = useRef();
-  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const simRef = useRef(null);
+  if (!simRef.current) {
+    simRef.current = {
+      nextIdx: 0,
+      spawnTimer: 0,
+      activeCount: 0,
+      list: Array.from({ length: MAX_EMITTER_PARTICLES }, () => ({
+        x: 0, y: -999, z: 0, vx: 0, vy: 0, vz: 0, scale: 0.1, life: 1, maxLife: 0.75, active: false
+      }))
+    };
+  }
 
-  const particles = useRef(
-    Array.from({ length: maxParticles }, () => ({
-      pos: new THREE.Vector3(0, -999, 0),
-      vel: new THREE.Vector3(),
-      scale: 0.1,
-      life: 1.0,
-      maxLife: 0.75,
-      active: false
-    }))
-  );
-
-  const nextSpawnIndex = useRef(0);
-  const spawnTimer = useRef(0);
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    for (let i = 0; i < MAX_EMITTER_PARTICLES; i++) mesh.setMatrixAt(i, _zeroMatrix);
+    mesh.instanceMatrix.needsUpdate = true;
+  }, []);
 
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
-    const pList = particles.current;
+    const sim = simRef.current;
     const mesh = meshRef.current;
     if (!mesh) return;
 
     const st = useGameStore.getState();
     const isBoat = st.vehicleType === 'boat';
     const isHeli = st.vehicleType === 'helicopter';
-    const shouldEmit = isHeli
-      ? false
-      : isWater
-        ? (st.isInWater || isBoat) && Math.abs(st.speed) > 1.5
-        : st.isDrifting && !st.isInWater && !isBoat;
+    const shouldEmit = !isHeli && (isWater
+      ? (st.isInWater || isBoat) && Math.abs(st.speed) > 1.5
+      : st.isDrifting && !st.isInWater && !isBoat);
 
-    spawnTimer.current += dt;
-    if (shouldEmit && spawnTimer.current > 0.04) {
-      spawnTimer.current = 0;
+    if (!shouldEmit && sim.activeCount === 0) return;
+
+    const dt = Math.min(delta, 0.05);
+    let needsUpdate = false;
+
+    sim.spawnTimer += dt;
+    if (shouldEmit && sim.spawnTimer > 0.04) {
+      sim.spawnTimer = 0;
       const halfLen = (st.vehicleLength || 3.9) * 0.44;
       const sideSpread = isBoat ? (st.vehicleLength || 10) * 0.12 : 0.68;
-      const sides = [-sideSpread, sideSpread];
       for (let s = 0; s < 2; s++) {
-        const xOff = sides[s];
-        const p = pList[nextSpawnIndex.current % maxParticles];
-        nextSpawnIndex.current++;
-        p.active = true;
+        const xOff = s === 0 ? -sideSpread : sideSpread;
+        const p = sim.list[sim.nextIdx];
+        sim.nextIdx = (sim.nextIdx + 1) % MAX_EMITTER_PARTICLES;
+        if (!p.active) { p.active = true; sim.activeCount++; }
         p.life = 0;
         p.maxLife = isWater ? (isBoat ? 0.65 + Math.random() * 0.35 : 0.38 + Math.random() * 0.25) : 0.5 + Math.random() * 0.3;
         p.scale = isWater ? (isBoat ? 0.45 + Math.random() * 0.35 : 0.24 + Math.random() * 0.18) : 0.18 + Math.random() * 0.12;
-        p.pos.set(
-          xOff + (Math.random() - 0.5) * 0.3,
-          (isWater ? (isBoat ? 0.15 : 0.28) : 0.10) + Math.random() * 0.08,
-          isBoat ? -halfLen - Math.random() * 0.5 : (isWater ? 0.4 : -1.48) - Math.random() * 1.4
-        );
-        p.vel.set(
-          (xOff > 0 ? 1 : -1) * (isWater ? (isBoat ? 2.2 : 1.4) : 0.35) + (Math.random() - 0.5) * 0.6,
-          (isWater ? (isBoat ? 1.4 : 2.2) : 0.6) + Math.random() * 0.9,
-          -1.4 - Math.random() * 1.2
-        );
+        p.x = xOff + (Math.random() - 0.5) * 0.3;
+        p.y = (isWater ? (isBoat ? 0.15 : 0.28) : 0.10) + Math.random() * 0.08;
+        p.z = isBoat ? -halfLen - Math.random() * 0.5 : (isWater ? 0.4 : -1.48) - Math.random() * 1.4;
+        p.vx = (xOff > 0 ? 1 : -1) * (isWater ? (isBoat ? 2.2 : 1.4) : 0.35) + (Math.random() - 0.5) * 0.6;
+        p.vy = (isWater ? (isBoat ? 1.4 : 2.2) : 0.6) + Math.random() * 0.9;
+        p.vz = -1.4 - Math.random() * 1.2;
       }
+      needsUpdate = true;
     }
 
-    let needsUpdate = false;
-    for (let i = 0; i < maxParticles; i++) {
-      const p = pList[i];
-      if (!p.active) {
-        dummy.position.set(0, -999, 0);
-        dummy.scale.setScalar(0);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-        continue;
-      }
+    const growth = isWater ? 1.8 : 2.6;
+    for (let i = 0; i < MAX_EMITTER_PARTICLES; i++) {
+      const p = sim.list[i];
+      if (!p.active) continue;
 
       needsUpdate = true;
       p.life += dt;
       if (p.life >= p.maxLife) {
         p.active = false;
-        dummy.position.set(0, -999, 0);
-        dummy.scale.setScalar(0);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
+        sim.activeCount--;
+        mesh.setMatrixAt(i, _zeroMatrix);
         continue;
       }
 
-      const progress = p.life / p.maxLife;
-      if (isWater) p.vel.y -= 7.5 * dt; // splash arc gravity
-      p.pos.x += p.vel.x * dt;
-      p.pos.y += p.vel.y * dt;
-      p.pos.z += p.vel.z * dt;
-      dummy.position.copy(p.pos);
-      dummy.scale.setScalar(p.scale * (1.0 + progress * (isWater ? 1.8 : 2.6)));
-      dummy.rotation.x += dt * 0.6;
-      dummy.rotation.y += dt * 0.9;
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      if (isWater) p.vy -= 7.5 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      _pDummy.position.set(p.x, p.y, p.z);
+      _pDummy.scale.setScalar(p.scale * (1.0 + (p.life / p.maxLife) * growth));
+      _pDummy.rotation.set(p.life * 0.6, p.life * 0.9, 0);
+      _pDummy.updateMatrix();
+      mesh.setMatrixAt(i, _pDummy.matrix);
     }
 
-    if (needsUpdate || shouldEmit) {
+    if (needsUpdate) {
       mesh.instanceMatrix.needsUpdate = true;
     }
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[null, null, maxParticles]}>
+    <instancedMesh ref={meshRef} args={[null, null, MAX_EMITTER_PARTICLES]}>
       <planeGeometry args={[0.32, 0.32]} />
       <meshBasicMaterial
         color={isWater ? '#b8f2ff' : '#d2dce6'}
@@ -462,6 +470,63 @@ function WheelParticleEmitter({ mode = 'smoke' }) {
       />
     </instancedMesh>
   );
+}
+
+const TEX_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap', 'bumpMap'];
+
+function disposeMaterialAndTextures(mat) {
+  if (!mat) return;
+  for (let i = 0; i < TEX_SLOTS.length; i++) {
+    const tex = mat[TEX_SLOTS[i]];
+    if (tex && typeof tex.dispose === 'function') tex.dispose();
+  }
+  if (typeof mat.dispose === 'function') mat.dispose();
+}
+
+function styleVehicleMaterial(mat, fileName) {
+  if (mat.map && mat.map.colorSpace !== THREE.SRGBColorSpace) {
+    mat.map.colorSpace = THREE.SRGBColorSpace;
+    mat.map.anisotropy = 2;
+    mat.map.needsUpdate = true;
+  }
+  const matName = (mat.name || '').toLowerCase();
+  if (fileName.includes('fenomeno')) {
+    if (mat.name === 'Paint' || matName.includes('paint')) {
+      mat.roughness = 0.18; mat.metalness = 0.55;
+      if ('clearcoat' in mat) mat.clearcoat = 1.0;
+      if ('clearcoatRoughness' in mat) mat.clearcoatRoughness = 0.08;
+    } else if (mat.name === 'Coloured') {
+      mat.roughness = 0.35; mat.metalness = 0.3;
+    }
+  } else if (mat.name === 'GREEN_car_paint' || matName.includes('green_car_paint')) {
+    mat.color.set('#15803d'); mat.roughness = 0.2; mat.metalness = 0.5;
+    if ('clearcoat' in mat) mat.clearcoat = 1.0;
+  } else if (mat.name === 'Coloured' && fileName.includes('ferrari')) {
+    mat.color.set('#1e293b'); mat.roughness = 0.35; mat.metalness = 0.5;
+  } else if (mat.name === 'chassis.011' || (fileName.includes('bmw') && matName.includes('chassis'))) {
+    mat.color.set('#c8d0dc'); mat.roughness = 0.22; mat.metalness = 0.75;
+    if ('clearcoat' in mat) mat.clearcoat = 0.9;
+  } else if (fileName.includes('dominus')) {
+    if (mat.name === 'Window') {
+      mat.color.set('#1a2634'); mat.transparent = true; mat.opacity = 0.45; mat.roughness = 0.1;
+    } else if (mat.name === 'Cristiano' || mat.name === 'Tread') {
+      mat.color.set('#1a1a1a'); mat.roughness = 0.88; mat.metalness = 0.08;
+    }
+  }
+
+  if (matName.includes('window') || matName.includes('glass') || matName.includes('windshield')) {
+    if (!mat.map && (mat.color.getHex() === 0 || mat.color.getHex() === 0xffffff)) {
+      mat.color.set('#141c26'); mat.transparent = true; mat.opacity = 0.42; mat.roughness = 0.1; mat.metalness = 0.2;
+    }
+  } else if (!mat.map && mat.color.getHex() === 0) {
+    const isTire = matName.includes('tire') || matName.includes('tyre') || matName.includes('tread') || matName.includes('rubber');
+    const isBody = matName.includes('paint') || matName.includes('body') || matName.includes('chassis') || matName.includes('car');
+    if (isBody) { mat.color.set('#242b35'); mat.roughness = 0.25; mat.metalness = 0.6; }
+    else if (isTire) { mat.color.set('#1a1a1a'); mat.roughness = 0.85; mat.metalness = 0.05; }
+    else { mat.color.set('#202328'); mat.roughness = Math.max(0.3, mat.roughness); }
+  }
+  if (mat.metalness >= 0.85 && mat.roughness <= 0.05) mat.roughness = 0.12;
+  mat.needsUpdate = true;
 }
 
 export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset = 0, vehicleType = 'car' } = {}) {
@@ -485,52 +550,11 @@ export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset
       node.receiveShadow = false;
 
       if (node.material) {
-        const mats = Array.isArray(node.material) ? node.material : [node.material];
-        mats.forEach((mat) => {
-          if (mat.map) {
-            mat.map.colorSpace = THREE.SRGBColorSpace;
-            mat.map.anisotropy = 2;
-            mat.map.needsUpdate = true;
-          }
-          const matName = (mat.name || '').toLowerCase();
-          if (fileName.includes('fenomeno')) {
-            if (mat.name === 'Paint' || matName.includes('paint')) {
-              mat.roughness = 0.18; mat.metalness = 0.55;
-              if ('clearcoat' in mat) mat.clearcoat = 1.0;
-              if ('clearcoatRoughness' in mat) mat.clearcoatRoughness = 0.08;
-            } else if (mat.name === 'Coloured') {
-              mat.roughness = 0.35; mat.metalness = 0.3;
-            }
-          } else if (mat.name === 'GREEN_car_paint' || matName.includes('green_car_paint')) {
-            mat.color.set('#15803d'); mat.roughness = 0.2; mat.metalness = 0.5;
-            if ('clearcoat' in mat) mat.clearcoat = 1.0;
-          } else if (mat.name === 'Coloured' && fileName.includes('ferrari')) {
-            mat.color.set('#1e293b'); mat.roughness = 0.35; mat.metalness = 0.5;
-          } else if (mat.name === 'chassis.011' || (fileName.includes('bmw') && matName.includes('chassis'))) {
-            mat.color.set('#c8d0dc'); mat.roughness = 0.22; mat.metalness = 0.75;
-            if ('clearcoat' in mat) mat.clearcoat = 0.9;
-          } else if (fileName.includes('dominus')) {
-            if (mat.name === 'Window') {
-              mat.color.set('#1a2634'); mat.transparent = true; mat.opacity = 0.45; mat.roughness = 0.1;
-            } else if (mat.name === 'Cristiano' || mat.name === 'Tread') {
-              mat.color.set('#1a1a1a'); mat.roughness = 0.88; mat.metalness = 0.08;
-            }
-          }
-
-          if (matName.includes('window') || matName.includes('glass') || matName.includes('windshield')) {
-            if (!mat.map && (mat.color.getHex() === 0 || mat.color.getHex() === 0xffffff)) {
-              mat.color.set('#141c26'); mat.transparent = true; mat.opacity = 0.42; mat.roughness = 0.1; mat.metalness = 0.2;
-            }
-          } else if (!mat.map && mat.color.getHex() === 0) {
-            const isTire = matName.includes('tire') || matName.includes('tyre') || matName.includes('tread') || matName.includes('rubber');
-            const isBody = matName.includes('paint') || matName.includes('body') || matName.includes('chassis') || matName.includes('car');
-            if (isBody) { mat.color.set('#242b35'); mat.roughness = 0.25; mat.metalness = 0.6; }
-            else if (isTire) { mat.color.set('#1a1a1a'); mat.roughness = 0.85; mat.metalness = 0.05; }
-            else { mat.color.set('#202328'); mat.roughness = Math.max(0.3, mat.roughness); }
-          }
-          if (mat.metalness >= 0.85 && mat.roughness <= 0.05) mat.roughness = 0.12;
-          mat.needsUpdate = true;
-        });
+        if (Array.isArray(node.material)) {
+          for (let i = 0; i < node.material.length; i++) styleVehicleMaterial(node.material[i], fileName);
+        } else {
+          styleVehicleMaterial(node.material, fileName);
+        }
       }
     }
   });
@@ -539,35 +563,30 @@ export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset
   const rotors = vehicleType === 'helicopter' ? setupHelicopterRotors(root, fileName) : [];
 
   root.updateMatrixWorld(true);
-  const rawBox = new THREE.Box3().setFromObject(root);
-  const rawSize = new THREE.Vector3();
-  rawBox.getSize(rawSize);
+  _scratchBox.setFromObject(root).getSize(_scratchV1);
 
   const explicitRot = KNOWN_ORIENTATIONS[fileName];
   if (explicitRot) {
     root.rotation.set(explicitRot[0], explicitRot[1], explicitRot[2]);
-  } else if (rawSize.x > rawSize.z * 1.3 && rawSize.x > rawSize.y) {
+  } else if (_scratchV1.x > _scratchV1.z * 1.3 && _scratchV1.x > _scratchV1.y) {
     root.rotation.y = -Math.PI / 2;
-  } else if (rawSize.y > rawSize.z * 1.3 && rawSize.y > rawSize.x) {
+  } else if (_scratchV1.y > _scratchV1.z * 1.3 && _scratchV1.y > _scratchV1.x) {
     root.rotation.x = -Math.PI / 2;
   }
 
   root.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(root);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
+  _scratchBox.setFromObject(root);
+  _scratchBox.getSize(_scratchV1);
+  _scratchBox.getCenter(_scratchV2);
 
-  // Cars sit flush at y=0; boats sink partially by waterlineOffset so hull rests naturally in the water
-  const ySink = vehicleType === 'boat' ? size.y * waterlineOffset : 0;
-  root.position.set(-center.x, -box.min.y - ySink, -center.z);
+  const ySink = vehicleType === 'boat' ? _scratchV1.y * waterlineOffset : 0;
+  root.position.set(-_scratchV2.x, -_scratchBox.min.y - ySink, -_scratchV2.z);
 
   const finalLength = targetLength || (vehicleType === 'boat' ? 11.0 : vehicleType === 'helicopter' ? 11.5 : TARGET_CAR_LENGTH);
   const wrapper = new THREE.Group();
   wrapper.name = 'VehicleUniversalWrapper';
   wrapper.add(root);
-  wrapper.scale.setScalar(finalLength / Math.max(0.01, size.z));
+  wrapper.scale.setScalar(finalLength / Math.max(0.01, _scratchV1.z));
   wrapper.updateMatrixWorld(true);
 
   if (fileName === 'aquitaine_-_french_ship.glb') {
@@ -595,14 +614,24 @@ function UniversalCarGLB({ url, targetLength, waterlineOffset, vehicleType }) {
 
   useEffect(() => {
     return () => {
-      // Keep shared boat, helicopter & parked-car materials alive for DockedVehicles
+      // Keep shared boats, helicopters, rival SLS GT3, and parked car alive in VRAM
       const activeParkedPath = useGameStore.getState().parkedCar?.modelPath;
-      const isShared = url && (url.startsWith('/boats/') || url.startsWith('/Helicopters/') || url === activeParkedPath);
+      const isShared = url && (
+        url.startsWith('/boats/') ||
+        url.startsWith('/Helicopters/') ||
+        url === activeParkedPath ||
+        url.includes('mercedes_sls_gt3')
+      );
       if (adapted?.wrapper && !isShared) {
         adapted.wrapper.traverse((child) => {
-          if (child.isMesh && child.material) {
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
-            mats.forEach((m) => { if (m && typeof m.dispose === 'function') m.dispose(); });
+          if (!child.isMesh) return;
+          if (child.geometry && typeof child.geometry.dispose === 'function') child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              for (let i = 0; i < child.material.length; i++) disposeMaterialAndTextures(child.material[i]);
+            } else {
+              disposeMaterialAndTextures(child.material);
+            }
           }
         });
       }

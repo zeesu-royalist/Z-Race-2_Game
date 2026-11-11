@@ -1,138 +1,129 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 
 const MAX_SKID_MARKS = 80;
+const HALF_TRACK = 0.64;
+const REAR_AXLE_OFFSET = -1.4;
+const SKID_WIDTH = 0.28;
+
+const _skidMat4 = new THREE.Matrix4();
+const _hiddenMat4 = new THREE.Matrix4().makeScale(0, 0, 0).setPosition(0, -999, 0);
+
+function writeSkidMatrix(mesh, index, x, y, z, rotY, scaleZ) {
+  const c = Math.cos(rotY);
+  const s = Math.sin(rotY);
+  const me = _skidMat4.elements;
+  me[0] = SKID_WIDTH * c;  me[1] = 0; me[2] = -SKID_WIDTH * s; me[3] = 0;
+  me[4] = -scaleZ * s;     me[5] = 0; me[6] = -scaleZ * c;     me[7] = 0;
+  me[8] = 0;               me[9] = 1; me[10] = 0;              me[11] = 0;
+  me[12] = x;              me[13] = y; me[14] = z;             me[15] = 1;
+  mesh.setMatrixAt(index, _skidMat4);
+}
 
 /**
- * Ultra-Lightweight, Zero-GC Instanced Tire Skidmark Trail
- * Renders authentic dark rubber burn marks on the asphalt during power drifts.
+ * Zero-GC Instanced Tire Skidmark Trail.
+ * Uses flat Float32 lifetimes, direct 4x4 matrix writes on spawn/expiry only, and idle draw-call hiding.
  */
 export function TireSkidmarks() {
   const meshRef = useRef();
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-
-  // Pre-allocated ring buffer
-  const marks = useRef(
-    Array.from({ length: MAX_SKID_MARKS }, () => ({
-      pos: new THREE.Vector3(0, -999, 0),
-      rotY: 0,
-      opacity: 0,
-      life: 0,
-      maxLife: 6.0,
-      active: false
-    }))
-  );
-
-  const nextIndex = useRef(0);
-  const dropTimer = useRef(0);
-
-  const math = useRef({
-    carPos: new THREE.Vector3(),
-    sinR: 0,
-    cosR: 0
+  const stateRef = useRef({
+    life: new Float32Array(MAX_SKID_MARKS),
+    nextIdx: 0,
+    dropTimer: 0,
+    activeCount: 0
   });
 
-  // Initialize hidden instances once on mount (avoids resetting 120 matrices every frame)
+  const { geometry, material } = useMemo(() => ({
+    geometry: new THREE.PlaneGeometry(1, 1),
+    material: new THREE.MeshBasicMaterial({
+      color: '#15171a',
+      transparent: true,
+      opacity: 0.48,
+      depthWrite: false
+    })
+  }), []);
+
   useEffect(() => {
     const mesh = meshRef.current;
-    if (!mesh) return;
-
-    dummy.position.set(0, -999, 0);
-    dummy.scale.setScalar(0);
-    dummy.updateMatrix();
-
-    for (let i = 0; i < MAX_SKID_MARKS; i++) {
-      mesh.setMatrixAt(i, dummy.matrix);
+    if (mesh) {
+      for (let i = 0; i < MAX_SKID_MARKS; i++) mesh.setMatrixAt(i, _hiddenMat4);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.updateMatrix();
+      mesh.matrixAutoUpdate = false;
+      mesh.visible = false;
     }
-    mesh.instanceMatrix.needsUpdate = true;
-  }, [dummy]);
+    return () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [geometry, material]);
 
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
     const mesh = meshRef.current;
     if (!mesh) return;
 
+    const st = stateRef.current;
     const { carPosition, carRotation, isDrifting, speed } = useGameStore.getState();
-    const m = math.current;
-    const markList = marks.current;
 
-    dropTimer.current += dt;
+    // Early-out with zero draw calls when not drifting and no active trails remain
+    if (!isDrifting && st.activeCount === 0) {
+      if (mesh.visible) mesh.visible = false;
+      return;
+    }
 
-    // Drop skidmarks when drifting at sufficient speed
-    const shouldDropSkid = isDrifting && speed > 15 && dropTimer.current > 0.045;
+    const dt = Math.min(delta, 0.05);
+    let matrixDirty = false;
 
-    if (shouldDropSkid) {
-      dropTimer.current = 0;
-      m.carPos.set(carPosition[0], carPosition[1], carPosition[2]);
-      m.sinR = Math.sin(carRotation);
-      m.cosR = Math.cos(carRotation);
+    st.dropTimer += dt;
+    if (isDrifting && speed > 15 && st.dropTimer > 0.045) {
+      st.dropTimer = 0;
+      const sinR = Math.sin(carRotation);
+      const cosR = Math.cos(carRotation);
+      const scaleZ = Math.min(1.0, 0.45 * (speed / 40));
+      const worldY = carPosition[1] + 0.015;
+      const zShift = REAR_AXLE_OFFSET * sinR;
+      const zCos = REAR_AXLE_OFFSET * cosR;
 
-      const tireOffsets = [-0.64, 0.64];
+      for (let side = -1; side <= 1; side += 2) {
+        const offX = side * HALF_TRACK;
+        const slot = st.nextIdx % MAX_SKID_MARKS;
+        st.nextIdx++;
+        if (st.life[slot] <= 0) st.activeCount++;
+        st.life[slot] = 5.0;
 
-      for (let i = 0; i < 2; i++) {
-        const offX = tireOffsets[i];
-        const offZ = -1.4;
+        writeSkidMatrix(
+          mesh,
+          slot,
+          carPosition[0] + offX * cosR + zShift,
+          worldY,
+          carPosition[2] - offX * sinR + zCos,
+          carRotation,
+          scaleZ
+        );
+      }
+      matrixDirty = true;
+    }
 
-        const worldX = m.carPos.x + offX * m.cosR + offZ * m.sinR;
-        const worldZ = m.carPos.z - offX * m.sinR + offZ * m.cosR;
-        const worldY = m.carPos.y + 0.015;
-
-        const mark = markList[nextIndex.current % MAX_SKID_MARKS];
-        nextIndex.current++;
-
-        mark.active = true;
-        mark.pos.set(worldX, worldY, worldZ);
-        mark.rotY = carRotation;
-        mark.life = 5.0;
-        mark.maxLife = 5.0;
+    if (st.activeCount > 0) {
+      const life = st.life;
+      for (let i = 0; i < MAX_SKID_MARKS; i++) {
+        if (life[i] <= 0) continue;
+        life[i] -= dt;
+        if (life[i] <= 0) {
+          life[i] = 0;
+          st.activeCount--;
+          mesh.setMatrixAt(i, _hiddenMat4);
+          matrixDirty = true;
+        }
       }
     }
 
-    // Only update active skidmarks (O(active) instead of O(total) per frame)
-    let needsUpdate = false;
-    for (let i = 0; i < MAX_SKID_MARKS; i++) {
-      const mark = markList[i];
-      if (!mark.active) {
-        continue; // Skip inactive marks!
-      }
-
-      needsUpdate = true;
-      mark.life -= dt;
-      if (mark.life <= 0) {
-        mark.active = false;
-        dummy.position.set(0, -999, 0);
-        dummy.scale.setScalar(0);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-        continue;
-      }
-
-      const currentScaleX = 0.28;
-      const currentScaleZ = Math.min(1.0, 0.45 * (speed / 40));
-
-      dummy.position.copy(mark.pos);
-      dummy.rotation.set(-Math.PI / 2, 0, mark.rotY);
-      dummy.scale.set(currentScaleX, currentScaleZ, 1);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-    }
-
-    if (needsUpdate || shouldDropSkid) {
-      mesh.instanceMatrix.needsUpdate = true;
-    }
+    mesh.visible = st.activeCount > 0;
+    if (matrixDirty) mesh.instanceMatrix.needsUpdate = true;
   });
 
-  return (
-    <instancedMesh ref={meshRef} args={[null, null, MAX_SKID_MARKS]}>
-      <planeGeometry args={[1, 1]} />
-      <meshBasicMaterial
-        color="#15171a"
-        transparent
-        opacity={0.48}
-        depthWrite={false}
-      />
-    </instancedMesh>
-  );
+  return <instancedMesh ref={meshRef} args={[geometry, material, MAX_SKID_MARKS]} frustumCulled={false} />;
 }

@@ -1,5 +1,5 @@
-// High performance Web Audio API procedural sound synthesizer for car racing
-// Ultra-optimized, zero-latency dynamic engine, drift, turbo & crash audio
+// High performance Web Audio API procedural sound synthesizer for Z-Race
+// Zero idle timeline churn, lazy aircraft WAV loading, and automatic node cleanup
 
 const PROFILES = {
   ev: { base: [120, 680], f: [900, 3000], osc: 'sine', boost: 0, gain: [0.25, 0.35, 0.08, 0.30] },
@@ -11,6 +11,8 @@ const PROFILES = {
   helicopter: { sample: '/audio/helicopter.wav', rate: [0.88, 0.42], sGain: [0.55, 0.18, 0.25] },
   plane: { sample: '/audio/plane.wav', rate: [0.82, 0.56], sGain: [0.52, 0.18, 0.28] }
 };
+
+const CHECKPOINT_FREQS = [523.25, 659.25, 783.99, 1046.50];
 
 class SoundSystem {
   constructor() {
@@ -26,19 +28,25 @@ class SoundSystem {
     this.osc2 = null;
     this.oscSub = null;
     this.engineFilter = null;
+    this.noiseBuffer = null;
 
     this.skidGain = null;
-    this.skidNoise = null;
     this.skidFilter = null;
     this.skidSqueal = null;
 
     this.nitroGain = null;
-    this.nitroNoise = null;
-
     this.sampleGain = null;
     this.sampleBuffers = {};
     this.sampleSrc = null;
     this.sampleKey = '';
+
+    // Cached state to avoid scheduling redundant Web Audio automation events at 60 FPS
+    this._wasDrifting = false;
+    this._wasNitro = false;
+    this._wasMuted = false;
+    this._lastRpmNorm = -1;
+    this._lastThrottle = null;
+    this._lastProfKey = '';
   }
 
   init() {
@@ -50,42 +58,43 @@ class SoundSystem {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
-      this.ctx = new AudioCtx();
+      const ctx = new AudioCtx();
+      this.ctx = ctx;
+      const t = ctx.currentTime;
 
-      // Master Gain directly to destination
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.enabled ? 1.0 : 0.0, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
+      this.masterGain = ctx.createGain();
+      this.masterGain.gain.setValueAtTime(this.enabled ? 1.0 : 0.0, t);
+      this.masterGain.connect(ctx.destination);
 
       // 1. Engine Synthesizer
-      this.engineGain = this.ctx.createGain();
-      this.engineGain.gain.setValueAtTime(0.40, this.ctx.currentTime);
+      this.engineGain = ctx.createGain();
+      this.engineGain.gain.setValueAtTime(0.40, t);
 
-      this.engineFilter = this.ctx.createBiquadFilter();
+      this.engineFilter = ctx.createBiquadFilter();
       this.engineFilter.type = 'lowpass';
-      this.engineFilter.frequency.setValueAtTime(800, this.ctx.currentTime);
-      this.engineFilter.Q.setValueAtTime(2.2, this.ctx.currentTime);
+      this.engineFilter.frequency.setValueAtTime(800, t);
+      this.engineFilter.Q.setValueAtTime(2.2, t);
 
-      this.osc1 = this.ctx.createOscillator();
+      this.osc1 = ctx.createOscillator();
       this.osc1.type = 'sawtooth';
-      this.osc1.frequency.setValueAtTime(68, this.ctx.currentTime);
+      this.osc1.frequency.setValueAtTime(68, t);
 
-      this.osc2 = this.ctx.createOscillator();
+      this.osc2 = ctx.createOscillator();
       this.osc2.type = 'triangle';
-      this.osc2.frequency.setValueAtTime(136, this.ctx.currentTime);
+      this.osc2.frequency.setValueAtTime(136, t);
 
-      this.oscSub = this.ctx.createOscillator();
+      this.oscSub = ctx.createOscillator();
       this.oscSub.type = 'sine';
-      this.oscSub.frequency.setValueAtTime(51, this.ctx.currentTime);
+      this.oscSub.frequency.setValueAtTime(51, t);
 
-      const engineMix = this.ctx.createGain();
-      const osc2Gain = this.ctx.createGain();
-      osc2Gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+      const engineMix = ctx.createGain();
+      const osc2Gain = ctx.createGain();
+      osc2Gain.gain.setValueAtTime(0.5, t);
       this.osc2.connect(osc2Gain);
       osc2Gain.connect(engineMix);
 
-      const oscSubGain = this.ctx.createGain();
-      oscSubGain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+      const oscSubGain = ctx.createGain();
+      oscSubGain.gain.setValueAtTime(0.4, t);
       this.oscSub.connect(oscSubGain);
       oscSubGain.connect(engineMix);
 
@@ -98,75 +107,84 @@ class SoundSystem {
       this.osc2.start();
       this.oscSub.start();
 
-      // 2. Skid / Drift Synthesizer
-      this.skidGain = this.ctx.createGain();
-      this.skidGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
-
-      const bufferSize = this.ctx.sampleRate * 2;
-      const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      // Shared 1-second looping white noise buffer (half the PCM memory of 2s buffer)
+      const bufferSize = ctx.sampleRate;
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const output = noiseBuffer.getChannelData(0);
       for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
       this.noiseBuffer = noiseBuffer;
 
-      this.skidNoise = this.ctx.createBufferSource();
-      this.skidNoise.buffer = noiseBuffer;
-      this.skidNoise.loop = true;
+      // 2. Skid / Drift Synthesizer
+      this.skidGain = ctx.createGain();
+      this.skidGain.gain.setValueAtTime(0.0, t);
 
-      this.skidFilter = this.ctx.createBiquadFilter();
+      const skidNoise = ctx.createBufferSource();
+      skidNoise.buffer = noiseBuffer;
+      skidNoise.loop = true;
+
+      this.skidFilter = ctx.createBiquadFilter();
       this.skidFilter.type = 'bandpass';
-      this.skidFilter.frequency.setValueAtTime(1400, this.ctx.currentTime);
-      this.skidFilter.Q.setValueAtTime(3.0, this.ctx.currentTime);
+      this.skidFilter.frequency.setValueAtTime(1400, t);
+      this.skidFilter.Q.setValueAtTime(3.0, t);
 
-      this.skidSqueal = this.ctx.createOscillator();
+      this.skidSqueal = ctx.createOscillator();
       this.skidSqueal.type = 'sine';
-      this.skidSqueal.frequency.setValueAtTime(850, this.ctx.currentTime);
+      this.skidSqueal.frequency.setValueAtTime(850, t);
 
-      const squealGain = this.ctx.createGain();
-      squealGain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+      const squealGain = ctx.createGain();
+      squealGain.gain.setValueAtTime(0.35, t);
       this.skidSqueal.connect(squealGain);
       squealGain.connect(this.skidGain);
 
-      this.skidNoise.connect(this.skidFilter);
+      skidNoise.connect(this.skidFilter);
       this.skidFilter.connect(this.skidGain);
       this.skidGain.connect(this.masterGain);
-      this.skidNoise.start();
+      skidNoise.start();
       this.skidSqueal.start();
 
       // 3. Nitro Boost Synthesizer
-      this.nitroGain = this.ctx.createGain();
-      this.nitroGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+      this.nitroGain = ctx.createGain();
+      this.nitroGain.gain.setValueAtTime(0.0, t);
 
-      const nitroNoiseSource = this.ctx.createBufferSource();
-      nitroNoiseSource.buffer = noiseBuffer;
-      nitroNoiseSource.loop = true;
+      const nitroNoise = ctx.createBufferSource();
+      nitroNoise.buffer = noiseBuffer;
+      nitroNoise.loop = true;
 
-      const nitroFilter = this.ctx.createBiquadFilter();
+      const nitroFilter = ctx.createBiquadFilter();
       nitroFilter.type = 'lowpass';
-      nitroFilter.frequency.setValueAtTime(2500, this.ctx.currentTime);
+      nitroFilter.frequency.setValueAtTime(2500, t);
 
-      nitroNoiseSource.connect(nitroFilter);
+      nitroNoise.connect(nitroFilter);
       nitroFilter.connect(this.nitroGain);
       this.nitroGain.connect(this.masterGain);
-      nitroNoiseSource.start();
+      nitroNoise.start();
 
-      // 4. Real Sampled Aircraft Engine Bus (Helicopter & Plane seamless loops)
-      this.sampleGain = this.ctx.createGain();
-      this.sampleGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+      // 4. Aircraft Sample Bus (WAV files fetched lazily on first Helicopter/Plane entry)
+      this.sampleGain = ctx.createGain();
+      this.sampleGain.gain.setValueAtTime(0.0, t);
       this.sampleGain.connect(this.masterGain);
-      ['helicopter', 'plane'].forEach((k) => {
-        this.sampleBuffers[k] = 'loading';
-        fetch(PROFILES[k].sample)
-          .then((r) => r.arrayBuffer())
-          .then((ab) => this.ctx.decodeAudioData(ab))
-          .then((audioBuf) => { this.sampleBuffers[k] = audioBuf; })
-          .catch(() => { delete this.sampleBuffers[k]; });
-      });
 
       this.initialized = true;
-      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      if (PROFILES[this.currentProfile]?.sample) {
+        this._loadSample(this.currentProfile);
+      }
+      if (this.enabled && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
     } catch (e) {
       console.warn('Web Audio init error:', e);
     }
+  }
+
+  _loadSample(key) {
+    const prof = PROFILES[key];
+    if (!prof?.sample || !this.ctx || this.sampleBuffers[key]) return;
+    this.sampleBuffers[key] = 'loading';
+    fetch(prof.sample)
+      .then((r) => r.arrayBuffer())
+      .then((ab) => this.ctx.decodeAudioData(ab))
+      .then((audioBuf) => { this.sampleBuffers[key] = audioBuf; })
+      .catch(() => { delete this.sampleBuffers[key]; });
   }
 
   _syncSample(key) {
@@ -179,6 +197,10 @@ class SoundSystem {
     if (!key && this.sampleGain && this.ctx) {
       this.sampleGain.gain.cancelScheduledValues(0);
       this.sampleGain.gain.value = 0;
+      return;
+    }
+    if (key && !this.sampleBuffers[key]) {
+      this._loadSample(key);
       return;
     }
     const buf = key ? this.sampleBuffers[key] : null;
@@ -197,7 +219,7 @@ class SoundSystem {
       this.init();
       return;
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
+    if (this.enabled && this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
   }
@@ -214,29 +236,57 @@ class SoundSystem {
     else if (cat.includes('plane') || cat.includes('warbird') || cat.includes('prop') || cat.includes('fighter') || cat.includes('wing')) this.currentProfile = 'plane';
     else if (cat.includes('rotor') || cat.includes('hawk') || cat.includes('heli') || cat.includes('chopper')) this.currentProfile = 'helicopter';
     else this.currentProfile = 'jdm_turbo';
+
+    if (this.initialized && PROFILES[this.currentProfile]?.sample) {
+      this._loadSample(this.currentProfile);
+    }
   }
 
   updateEngine(rpm, throttle, speedKmH, category = '') {
     if (!this.initialized) this.init();
-    if (!this.enabled || !this.ctx) {
-      if (this.engineGain && this.ctx) this.engineGain.gain.setValueAtTime(0, this.ctx.currentTime);
-      if (this.sampleGain && this.ctx) this.sampleGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    if (!this.ctx) return;
+
+    if (!this.enabled) {
+      if (!this._wasMuted) {
+        this._wasMuted = true;
+        this._lastProfKey = '';
+        const t = this.ctx.currentTime;
+        this.engineGain?.gain.setValueAtTime(0, t);
+        this.sampleGain?.gain.setValueAtTime(0, t);
+      }
       return;
     }
+    this._wasMuted = false;
+
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     if (category && category !== this.lastCategory) this.setProfile(category);
 
+    const profKey = this.currentProfile;
+    const prof = PROFILES[profKey] || PROFILES.jdm_turbo;
     const normRPM = Math.max(0, Math.min(1, (rpm - 900) / 7100));
+    const throttleOn = !!throttle;
+
+    // Skip redundant Web Audio automation scheduling when idle or steady-state
+    const sameState =
+      profKey === this._lastProfKey &&
+      throttleOn === this._lastThrottle &&
+      Math.abs(normRPM - this._lastRpmNorm) < 0.002 &&
+      (!prof.sample || Boolean(this.sampleSrc));
+    if (sameState) return;
+
+    this._lastProfKey = profKey;
+    this._lastThrottle = throttleOn;
+    this._lastRpmNorm = normRPM;
+
     const t = this.ctx.currentTime;
-    const prof = PROFILES[this.currentProfile] || PROFILES.jdm_turbo;
 
     if (prof.sample) {
       this.engineGain.gain.setTargetAtTime(0, t, 0.04);
-      this._syncSample(this.currentProfile);
+      this._syncSample(profKey);
       if (this.sampleSrc) {
         this.sampleSrc.playbackRate.setTargetAtTime(prof.rate[0] + normRPM * prof.rate[1], t, 0.06);
       }
-      const g = prof.sGain[0] + (throttle ? prof.sGain[1] : 0) + normRPM * prof.sGain[2];
+      const g = prof.sGain[0] + (throttleOn ? prof.sGain[1] : 0) + normRPM * prof.sGain[2];
       this.sampleGain.gain.setTargetAtTime(this.sampleSrc ? g : 0, t, 0.05);
       return;
     }
@@ -244,8 +294,8 @@ class SoundSystem {
     this._syncSample('');
 
     const baseFreq = prof.base[0] + normRPM * prof.base[1];
-    const fFreq = prof.f[0] + normRPM * prof.f[1] + (throttle ? prof.boost : 0);
-    const targetGain = prof.gain[0] + (throttle ? prof.gain[1] : prof.gain[2]) + normRPM * prof.gain[3];
+    const fFreq = prof.f[0] + normRPM * prof.f[1] + (throttleOn ? prof.boost : 0);
+    const targetGain = prof.gain[0] + (throttleOn ? prof.gain[1] : prof.gain[2]) + normRPM * prof.gain[3];
 
     if (this.osc1.type !== prof.osc) this.osc1.type = prof.osc;
     this.osc1.frequency.setTargetAtTime(baseFreq, t, 0.04);
@@ -257,52 +307,53 @@ class SoundSystem {
 
   updateDrift(isDrifting, driftIntensity) {
     if (!this.initialized || !this.enabled || !this.ctx) return;
+    if (!isDrifting) {
+      if (this._wasDrifting) {
+        this._wasDrifting = false;
+        this.skidGain.gain.setTargetAtTime(0.0, this.ctx.currentTime, 0.05);
+      }
+      return;
+    }
+    this._wasDrifting = true;
     const t = this.ctx.currentTime;
-    this.skidGain.gain.setTargetAtTime(isDrifting ? Math.min(0.40, driftIntensity * 0.40) : 0.0, t, 0.05);
-    if (isDrifting && this.skidSqueal) {
+    this.skidGain.gain.setTargetAtTime(Math.min(0.40, driftIntensity * 0.40), t, 0.05);
+    if (this.skidSqueal) {
       this.skidSqueal.frequency.setTargetAtTime(700 + Math.random() * 400, t, 0.08);
     }
   }
 
   updateNitro(isActive) {
+    const active = !!isActive;
+    if (!this.initialized || !this.enabled || !this.ctx || active === this._wasNitro) return;
+    this._wasNitro = active;
+    this.nitroGain.gain.setTargetAtTime(active ? 0.35 : 0.0, this.ctx.currentTime, 0.08);
+  }
+
+  _playTone(type, startFreq, endFreq, freqDur, startGain, stopDur, delay = 0) {
     if (!this.initialized || !this.enabled || !this.ctx) return;
-    this.nitroGain.gain.setTargetAtTime(isActive ? 0.35 : 0.0, this.ctx.currentTime, 0.08);
+    try {
+      const t = this.ctx.currentTime + delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(startFreq, t);
+      if (endFreq !== startFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, t + freqDur);
+      gain.gain.setValueAtTime(startGain, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + stopDur);
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch {} };
+      osc.start(t);
+      osc.stop(t + stopDur);
+    } catch {}
   }
 
   playGearShift() {
-    if (!this.initialized || !this.enabled || !this.ctx) return;
-    try {
-      const t = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(450, t);
-      osc.frequency.exponentialRampToValueAtTime(120, t + 0.15);
-      gain.gain.setValueAtTime(0.35, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-      osc.connect(gain);
-      gain.connect(this.masterGain);
-      osc.start(t);
-      osc.stop(t + 0.2);
-    } catch {}
+    this._playTone('triangle', 450, 120, 0.15, 0.35, 0.2);
   }
 
   playCrash(intensity = 1.0) {
-    if (!this.initialized || !this.enabled || !this.ctx) return;
-    try {
-      const t = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(160, t);
-      osc.frequency.exponentialRampToValueAtTime(40, t + 0.25);
-      gain.gain.setValueAtTime(Math.min(0.65, 0.35 * intensity), t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-      osc.connect(gain);
-      gain.connect(this.masterGain);
-      osc.start(t);
-      osc.stop(t + 0.3);
-    } catch {}
+    this._playTone('triangle', 160, 40, 0.25, Math.min(0.65, 0.35 * intensity), 0.3);
   }
 
   playWaterSplash(intensity = 1.0) {
@@ -324,46 +375,21 @@ class SoundSystem {
       noise.connect(filter);
       filter.connect(gain);
       gain.connect(this.masterGain);
+      noise.onended = () => { try { noise.disconnect(); filter.disconnect(); gain.disconnect(); } catch {} };
       noise.start(t);
       noise.stop(t + 0.72);
     } catch {}
   }
 
   playCountdown(count) {
-    if (!this.initialized || !this.enabled || !this.ctx) return;
-    try {
-      const t = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      const isGo = count === 0;
-      osc.type = isGo ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(isGo ? 880 : 440, t);
-      gain.gain.setValueAtTime(isGo ? 0.45 : 0.30, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + (isGo ? 0.35 : 0.15));
-      osc.connect(gain);
-      gain.connect(this.masterGain);
-      osc.start(t);
-      osc.stop(t + (isGo ? 0.35 : 0.15));
-    } catch {}
+    const isGo = count === 0;
+    this._playTone(isGo ? 'triangle' : 'sine', isGo ? 880 : 440, isGo ? 880 : 440, 0, isGo ? 0.45 : 0.30, isGo ? 0.35 : 0.15);
   }
 
   playCheckpoint() {
-    if (!this.initialized || !this.enabled || !this.ctx) return;
-    try {
-      const t = this.ctx.currentTime;
-      [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, t + idx * 0.05);
-        gain.gain.setValueAtTime(0.25, t + idx * 0.05);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + idx * 0.05 + 0.4);
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-        osc.start(t + idx * 0.05);
-        osc.stop(t + idx * 0.05 + 0.4);
-      });
-    } catch {}
+    for (let i = 0; i < CHECKPOINT_FREQS.length; i++) {
+      this._playTone('sine', CHECKPOINT_FREQS[i], CHECKPOINT_FREQS[i], 0, 0.25, 0.4, i * 0.05);
+    }
   }
 
   setEnabled(val) {

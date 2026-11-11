@@ -9,6 +9,15 @@ export const BOAT_SPAWN_ROT_Y = Math.PI * 0.5;
 export const HELI_SPAWN_POS = [430, 0.01, -20];
 export const HELI_SPAWN_ROT_Y = Math.PI * 0.25;
 
+const CAMERA_MODES = ['close', 'far', 'aerial'];
+const TIME_MODES = ['day', 'sunset', 'night'];
+const COUNTDOWN_STEPS = [2, 1, 0, null];
+const PARIS_RETURN_POS = [395, 0.25, -35];
+const WEST_RETURN_POS = [-3.0, 0.3, 10.0];
+const RACE_START_POS = [-4.8, 0.3, 10.0];
+const HELI_FALLBACK_PIER = [418, 0.02, -20];
+const BOAT_FALLBACK_PIER = [386, WATER_SURFACE_Y + 0.44, -74.5];
+
 export const DOCK_HOME_SLOTS = {
   boat: {
     position: [392, WATER_SURFACE_Y, -82.5],
@@ -99,18 +108,42 @@ function applyVehicleFields(item, type, lastCarId, defaultCarItem) {
   };
 }
 
+function catalogMatches(prevList, nextList) {
+  if (prevList.length !== nextList.length) return false;
+  for (let i = 0; i < prevList.length; i++) {
+    const a = prevList[i], b = nextList[i];
+    if (a.id !== b.id || a.modelPath !== b.modelPath || a.name !== b.name) return false;
+  }
+  return true;
+}
+
+function clearUnusedCarModelCache(oldModelPath, nextModelPath, parkedPath) {
+  if (
+    !oldModelPath ||
+    oldModelPath === nextModelPath ||
+    oldModelPath === parkedPath ||
+    oldModelPath.startsWith('/boats/') ||
+    oldModelPath.startsWith('/Helicopters/') ||
+    oldModelPath.includes('mercedes_sls_gt3')
+  ) {
+    return;
+  }
+  try { useGLTF.clear(oldModelPath); } catch {}
+}
+
 let countdownTimers = [];
 const clearCountdownTimers = () => {
-  countdownTimers.forEach(clearTimeout);
-  countdownTimers = [];
+  for (let i = 0; i < countdownTimers.length; i++) clearTimeout(countdownTimers[i]);
+  countdownTimers.length = 0;
 };
 
 async function fetchVehicleManifest(apiUrl, manifestUrl) {
   try {
     const url = import.meta.env.DEV ? apiUrl : manifestUrl;
-    let res = await fetch(url, { cache: 'no-cache' });
+    const opts = import.meta.env.DEV ? { cache: 'no-cache' } : undefined;
+    let res = await fetch(url, opts);
     if (!res.ok && import.meta.env.DEV) {
-      res = await fetch(manifestUrl, { cache: 'no-cache' });
+      res = await fetch(manifestUrl, opts);
     }
     if (res.ok) {
       const list = await res.json();
@@ -143,14 +176,13 @@ export const useGameStore = create((set, get) => ({
   carBrand: defaultCar.brand || 'McLaren',
   carTuning: defaultCar.tuning,
 
-  // Car Telemetry
+  // Car Telemetry (updated at 60 FPS; steerAngle kept pre-shaped for stable V8 hidden class)
   speed: 0,
   rpm: 900,
   gear: '1',
   steerAngle: 0,
   isDrifting: false,
   driftScore: 0,
-  totalDriftScore: 0,
   nitro: 100,
   isNitroActive: false,
   isInWater: false,
@@ -163,7 +195,6 @@ export const useGameStore = create((set, get) => ({
   soundEnabled: true,
 
   // Racing & Checkpoints
-  gameMode: 'freeroam',
   raceActive: false,
   raceCountdown: null,
   racePosition: 4,
@@ -240,14 +271,12 @@ export const useGameStore = create((set, get) => ({
     get().teleportTo(slot.position, slot.rotationY);
   },
 
-  boardBoat: (boatId, carPos, carRotY) => get().boardWorldVehicle('boat', boatId, carPos, carRotY),
-
   returnToParkedCar: (livePos, liveRotY) => {
-    const { vehicleType, parkedCar, cars, currentCarId } = get();
+    const { vehicleType, parkedCar, cars, currentCarId, carPosition, carRotation } = get();
     if (vehicleType === 'car' || !parkedCar) return;
     const car = cars.find((c) => c.id === parkedCar.carId) || defaultCar;
-    const pos = Array.isArray(livePos) ? livePos : get().carPosition;
-    const rot = liveRotY ?? get().carRotation;
+    const pos = Array.isArray(livePos) ? livePos : carPosition;
+    const rot = liveRotY ?? carRotation;
 
     get().parkCurrentWorldPose(pos, rot);
     set({
@@ -266,7 +295,6 @@ export const useGameStore = create((set, get) => ({
     const item = pool.find((v) => v.id === vehicleId);
     if (!item) return;
 
-    const oldModelPath = carModelPath;
     const nextType = type === 'boat' ? 'boat' : type === 'helicopter' ? 'helicopter' : 'car';
 
     // Keep previously driven world vehicle parked where player left it
@@ -280,7 +308,7 @@ export const useGameStore = create((set, get) => ({
     let nextParkedCar = parkedCar;
     if (nextType !== 'car' && prevType === 'car') {
       const prevCar = cars.find((c) => c.id === currentCarId) || defaultCar;
-      const fallbackSpot = targetSlot?.pierPark || (nextType === 'helicopter' ? [418, 0.02, -20] : [386, WATER_SURFACE_Y + 0.44, -74.5]);
+      const fallbackSpot = targetSlot?.pierPark || (nextType === 'helicopter' ? HELI_FALLBACK_PIER : BOAT_FALLBACK_PIER);
       const nearSpot = Math.hypot(carPosition[0] - fallbackSpot[0], carPosition[2] - fallbackSpot[2]) < 42;
       nextParkedCar = {
         carId: prevCar.id,
@@ -305,15 +333,7 @@ export const useGameStore = create((set, get) => ({
       }
     });
 
-    if (
-      oldModelPath &&
-      oldModelPath !== item.modelPath &&
-      !oldModelPath.startsWith('/boats/') &&
-      !oldModelPath.startsWith('/Helicopters/') &&
-      oldModelPath !== nextParkedCar?.modelPath
-    ) {
-      try { useGLTF.clear(oldModelPath); } catch {}
-    }
+    clearUnusedCarModelCache(carModelPath, item.modelPath, nextParkedCar?.modelPath);
 
     if (nextType === 'boat' || nextType === 'helicopter') {
       const fallbackPos = nextType === 'helicopter' ? HELI_SPAWN_POS : BOAT_SPAWN_POS;
@@ -321,17 +341,16 @@ export const useGameStore = create((set, get) => ({
       get().teleportTo(targetSlot ? targetSlot.position : fallbackPos, targetSlot ? targetSlot.rotationY : fallbackRot);
     } else if (prevType !== 'car') {
       const inParis = carPosition[0] > 330;
-      get().teleportTo(inParis ? [395, 0.25, -35] : [-3.0, 0.3, 10.0], inParis ? Math.PI * 0.4 : 0);
+      get().teleportTo(inParis ? PARIS_RETURN_POS : WEST_RETURN_POS, inParis ? Math.PI * 0.4 : 0);
     } else if (resetToSpawn) {
       get().triggerReset();
     }
   },
 
-  selectCar: (carId, resetToSpawn = false) => get().selectVehicle(carId, 'car', resetToSpawn),
-
   syncCarsList: (newCarList) => {
     if (!Array.isArray(newCarList) || newCarList.length === 0) return;
-    const { currentCarId, vehicleType } = get();
+    const { cars, currentCarId, vehicleType } = get();
+    if (catalogMatches(cars, newCarList)) return;
     if (vehicleType !== 'car') {
       set({ cars: newCarList });
       return;
@@ -348,7 +367,7 @@ export const useGameStore = create((set, get) => ({
   },
 
   syncBoatsList: (newBoatList) => {
-    if (!Array.isArray(newBoatList) || newBoatList.length === 0) return;
+    if (!Array.isArray(newBoatList) || newBoatList.length === 0 || catalogMatches(get().boats, newBoatList)) return;
     set((s) => ({
       boats: newBoatList,
       dockedBoats: buildWorldSlots(newBoatList, DOCK_HOME_SLOTS, 'boat', s.dockedBoats)
@@ -356,7 +375,7 @@ export const useGameStore = create((set, get) => ({
   },
 
   syncHelicoptersList: (newHeliList) => {
-    if (!Array.isArray(newHeliList) || newHeliList.length === 0) return;
+    if (!Array.isArray(newHeliList) || newHeliList.length === 0 || catalogMatches(get().helicopters, newHeliList)) return;
     set((s) => ({
       helicopters: newHeliList,
       dockedHelicopters: buildWorldSlots(newHeliList, HELIPAD_HOME_SLOTS, 'helicopter', s.dockedHelicopters)
@@ -379,20 +398,9 @@ export const useGameStore = create((set, get) => ({
   },
 
   triggerReset: () => set((s) => ({ resetSignal: s.resetSignal + 1 })),
-  setNitro: (nitro) => set({ nitro }),
-  setNitroActive: (isNitroActive) => set({ isNitroActive }),
-  setCameraMode: (cameraMode) => set({ cameraMode }),
-  cycleCameraMode: () => {
-    const modes = ['close', 'far', 'aerial'];
-    set((s) => ({ cameraMode: modes[(modes.indexOf(s.cameraMode) + 1) % modes.length] }));
-  },
-  setTimeOfDay: (timeOfDay) => set({ timeOfDay }),
-  cycleTimeOfDay: () => {
-    const times = ['day', 'sunset', 'night'];
-    set((s) => ({ timeOfDay: times[(times.indexOf(s.timeOfDay) + 1) % times.length] }));
-  },
+  cycleCameraMode: () => set((s) => ({ cameraMode: CAMERA_MODES[(CAMERA_MODES.indexOf(s.cameraMode) + 1) % CAMERA_MODES.length] })),
+  cycleTimeOfDay: () => set((s) => ({ timeOfDay: TIME_MODES[(TIME_MODES.indexOf(s.timeOfDay) + 1) % TIME_MODES.length] })),
   toggleSound: () => set((s) => ({ soundEnabled: !s.soundEnabled })),
-  addDriftScore: (pts) => set((s) => ({ driftScore: s.driftScore + pts, totalDriftScore: s.totalDriftScore + pts })),
   setRacePosition: (racePosition) => set({ racePosition }),
 
   startRace: () => {
@@ -400,9 +408,8 @@ export const useGameStore = create((set, get) => ({
     if (get().vehicleType !== 'car') {
       get().selectVehicle(get().lastCarId || defaultCar.id, 'car', false);
     }
-    get().teleportTo([-4.8, 0.3, 10.0], 0);
+    get().teleportTo(RACE_START_POS, 0);
     set({
-      gameMode: 'race',
       raceActive: true,
       raceCountdown: 3,
       racePosition: 4,
@@ -413,18 +420,19 @@ export const useGameStore = create((set, get) => ({
     });
     soundManager.playCountdown(3);
 
-    [2, 1, 0, null].forEach((val, i) => {
-      const t = setTimeout(() => {
+    for (let i = 0; i < COUNTDOWN_STEPS.length; i++) {
+      const val = COUNTDOWN_STEPS[i];
+      const delay = (i + 1) * 1000 + (val === null ? 200 : 0);
+      countdownTimers.push(setTimeout(() => {
         set({ raceCountdown: val });
         if (val !== null) soundManager.playCountdown(val);
-      }, (i + 1) * 1000 + (val === null ? 200 : 0));
-      countdownTimers.push(t);
-    });
+      }, delay));
+    }
   },
 
   stopRace: () => {
     clearCountdownTimers();
-    set({ gameMode: 'freeroam', raceActive: false, raceCountdown: null, raceFinished: false });
+    set({ raceActive: false, raceCountdown: null, raceFinished: false });
   },
 
   reachCheckpoint: (checkpointIdx) => {

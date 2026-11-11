@@ -32,23 +32,6 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* ===== HIGH SPEED & NITRO VIGNETTE ===== */
-.speed-vignette {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 50;
-  opacity: 0;
-  transition: opacity 0.2s ease-out;
-  box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.4), inset 0 0 160px rgba(0, 240, 255, 0.2);
-  background: radial-gradient(circle at center, transparent 55%, rgba(0, 240, 255, 0.1) 85%, rgba(0, 200, 255, 0.28) 100%);
-}
-
-.nitro-vignette {
-  box-shadow: inset 0 0 120px rgba(0, 240, 255, 0.45), inset 0 0 200px rgba(0, 160, 255, 0.4);
-  background: radial-gradient(circle at center, transparent 48%, rgba(0, 240, 255, 0.18) 78%, rgba(0, 180, 255, 0.42) 100%);
-}
-
 /* ===== 3D CANVAS LOADING SCREEN ===== */
 .game-loading-overlay {
   position: absolute;
@@ -505,6 +488,7 @@ html, body, #root {
   backdrop-filter: none !important;
   pointer-events: none;
   user-select: none;
+  contain: layout style;
   z-index: 45;
   transform: skewX(-9deg); /* Forward aerodynamic slant */
   filter: drop-shadow(0 3px 12px rgba(0, 0, 0, 0.9));
@@ -682,6 +666,7 @@ html, body, #root {
   justify-content: space-between;
   align-items: flex-end;
   pointer-events: none;
+  contain: layout style;
   z-index: 45;
 }
 
@@ -975,14 +960,6 @@ html, body, #root {
   margin-bottom: 4px;
 }
 
-.car-card-desc {
-  font-size: 13px;
-  color: #9cb1c9;
-  line-height: 1.4;
-  margin-bottom: 14px;
-  min-height: 36px;
-}
-
 .car-specs-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1058,144 +1035,6 @@ html, body, #root {
   border-radius: 10px;
 }
 
-/* Add Car Section */
-.add-car-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 16px;
-}
-
-.add-car-trigger-btn {
-  width: 100%;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(0, 240, 255, 0.4);
-  color: var(--primary-cyan);
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 14px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.add-car-trigger-btn:hover {
-  background: rgba(0, 240, 255, 0.08);
-  border-color: var(--primary-cyan);
-}
-
-.add-car-form-box {
-  background: rgba(0, 240, 255, 0.05);
-  border: 1px solid rgba(0, 240, 255, 0.25);
-  border-radius: 16px;
-  padding: 16px 20px;
-}
-
-.form-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-family: 'Orbitron', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--primary-cyan);
-}
-
-.form-hint {
-  font-size: 13px;
-  color: #8fa0b5;
-  margin: 6px 0 10px;
-}
-
-.form-hint code {
-  color: var(--primary-cyan);
-  background: rgba(255, 255, 255, 0.1);
-  padding: 2px 5px;
-  border-radius: 4px;
-}
-
-.custom-model-form {
-  display: flex;
-  gap: 10px;
-}
-
-.model-path-input {
-  flex: 1;
-  background: rgba(6, 10, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-  padding: 10px 14px;
-  border-radius: 10px;
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 15px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.model-path-input:focus {
-  border-color: var(--primary-cyan);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
-}
-
-.apply-btn {
-  background: var(--primary-cyan);
-  border: none;
-  color: #000;
-  font-family: 'Orbitron', sans-serif;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  padding: 10px 18px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: transform 0.1s;
-}
-
-.apply-btn:hover {
-  transform: translateY(-1px);
-}
-
-/* Auto-sync banner */
-.auto-sync-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  background: rgba(0, 240, 255, 0.08);
-  border: 1px solid rgba(0, 240, 255, 0.25);
-  border-radius: 14px;
-  padding: 14px 18px;
-}
-
-.auto-sync-icon-col {
-  margin-top: 2px;
-}
-
-.auto-sync-title {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--primary-cyan);
-  display: block;
-  margin-bottom: 4px;
-}
-
-.auto-sync-text p {
-  font-size: 13px;
-  color: #a8bcd4;
-  line-height: 1.4;
-}
-
-.auto-sync-text code {
-  color: var(--primary-cyan);
-  background: rgba(255, 255, 255, 0.1);
-  padding: 2px 5px;
-  border-radius: 4px;
-}
-
 .car-filename-tag {
   font-size: 11px;
   font-family: monospace;
@@ -1252,16 +1091,6 @@ html, body, #root {
   transform: translateY(-1px);
 }
 
-.text-btn {
-  background: none;
-  border: none;
-  color: var(--primary-red);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
 /* ===== CONTROLS HELP MODAL ===== */
 .keys-grid {
   display: flex;
@@ -1309,7 +1138,6 @@ html, body, #root {
 
 /* Utilities */
 .text-cyan { color: var(--primary-cyan); }
-.text-yellow { color: var(--primary-gold); }
 
 /* ===== MOBILE AUTO-LANDSCAPE (PUBG STYLE 90° ROTATION) ===== */
 @media screen and (orientation: portrait) and (max-width: 1024px) {
@@ -1563,9 +1391,6 @@ html, body, #root {
   .modal-close-btn svg {
     width: 18px;
     height: 18px;
-  }
-  .auto-sync-banner {
-    display: none;
   }
   .garage-tabs {
     padding: 6px 12px;

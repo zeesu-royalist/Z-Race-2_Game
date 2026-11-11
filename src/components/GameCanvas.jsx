@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Sky, Environment } from '@react-three/drei';
 import * as THREE from 'three';
@@ -12,89 +12,96 @@ import { CameraRig } from './CameraRig';
 import { RacingSystem } from './RacingSystem';
 import { TireSkidmarks } from './TireSkidmarks';
 
+const IS_MOBILE_GPU =
+  typeof window !== 'undefined' &&
+  (window.matchMedia?.('(pointer: coarse)').matches || /Mobi|Android/i.test(navigator.userAgent));
 
+const SHADOW_SIZE = IS_MOBILE_GPU ? 256 : 512;
+const SHADOW_MAP_SIZE = [SHADOW_SIZE, SHADOW_SIZE];
+
+const RESIZE_CONFIG = { offsetSize: true };
+const SHADOW_CONFIG = { type: THREE.BasicShadowMap };
+const CAMERA_CONFIG = { position: [390.53, 1.8, -36.45], fov: 62, near: 0.2, far: 1200 };
+const GL_CONFIG = {
+  antialias: !IS_MOBILE_GPU,
+  stencil: false,
+  alpha: false,
+  powerPreference: 'high-performance',
+  toneMapping: THREE.ACESFilmicToneMapping,
+  toneMappingExposure: 1.15
+};
+
+const TIME_PRESETS = {
+  sunset: {
+    sky: { sunPosition: [200, 15, 60], turbidity: 8, rayleigh: 5, mieCoefficient: 0.005, mieDirectionalG: 0.85 },
+    ambientIntensity: 0.65,
+    ambientColor: '#ffd4a3',
+    dirPos: [140, 60, 60],
+    dirIntensity: 2.6,
+    dirColor: '#ff9944',
+    hemiSky: '#ff9955',
+    hemiGround: '#332211',
+    hemiIntensity: 0.7,
+    fog: ['#a85c42', 180, 920],
+    envPreset: 'sunset',
+    envIntensity: 0.8
+  },
+  night: {
+    sky: null,
+    bgColor: '#06080e',
+    ambientIntensity: 0.35,
+    ambientColor: '#4466aa',
+    dirPos: [60, 80, 60],
+    dirIntensity: 0.7,
+    dirColor: '#99bbff',
+    hemiSky: '#0c1626',
+    hemiGround: '#050608',
+    hemiIntensity: 0.4,
+    fog: ['#070a12', 150, 860],
+    envPreset: 'night',
+    envIntensity: 0.5
+  },
+  day: {
+    sky: { sunPosition: [120, 80, 100], turbidity: 4, rayleigh: 1.2, mieCoefficient: 0.002, mieDirectionalG: 0.8 },
+    ambientIntensity: 0.85,
+    ambientColor: '#ffffff',
+    dirPos: [100, 110, 80],
+    dirIntensity: 2.8,
+    dirColor: '#ffffff',
+    hemiSky: '#87ceeb',
+    hemiGround: '#3a4042',
+    hemiIntensity: 0.7,
+    fog: ['#b8d8ea', 200, 960],
+    envPreset: 'city',
+    envIntensity: 0.85
+  }
+};
 
 function EnvironmentLights() {
   const timeOfDay = useGameStore((s) => s.timeOfDay);
-  const shadowSize = 512;
+  const p = TIME_PRESETS[timeOfDay] || TIME_PRESETS.day;
 
-  if (timeOfDay === 'sunset') {
-    return (
-      <>
-        <Sky
-          distance={450000}
-          sunPosition={[200, 15, 60]}
-          turbidity={8}
-          rayleigh={5}
-          mieCoefficient={0.005}
-          mieDirectionalG={0.85}
-        />
-        <ambientLight intensity={0.65} color="#ffd4a3" />
-        <directionalLight
-          position={[140, 60, 60]}
-          intensity={2.6}
-          color="#ff9944"
-          castShadow
-          shadow-mapSize={[shadowSize, shadowSize]}
-          shadow-camera-near={10}
-          shadow-camera-far={260}
-          shadow-camera-left={-55}
-          shadow-camera-right={55}
-          shadow-camera-top={55}
-          shadow-camera-bottom={-55}
-          shadow-bias={-0.0003}
-        />
-        <hemisphereLight skyColor="#ff9955" groundColor="#332211" intensity={0.7} />
-        <fog attach="fog" args={['#a85c42', 180, 920]} />
-        <Environment preset="sunset" environmentIntensity={0.8} />
-      </>
-    );
-  }
-
-  if (timeOfDay === 'night') {
-    return (
-      <>
-        <color attach="background" args={['#06080e']} />
-        <ambientLight intensity={0.35} color="#4466aa" />
-        <directionalLight
-          position={[60, 80, 60]}
-          intensity={0.7}
-          color="#99bbff"
-          castShadow
-          shadow-mapSize={[shadowSize, shadowSize]}
-          shadow-camera-near={10}
-          shadow-camera-far={260}
-          shadow-camera-left={-55}
-          shadow-camera-right={55}
-          shadow-camera-top={55}
-          shadow-camera-bottom={-55}
-          shadow-bias={-0.0003}
-        />
-        <hemisphereLight skyColor="#0c1626" groundColor="#050608" intensity={0.4} />
-        <fog attach="fog" args={['#070a12', 150, 860]} />
-        <Environment preset="night" environmentIntensity={0.5} />
-      </>
-    );
-  }
-
-  // Day (Default)
   return (
     <>
-      <Sky
-        distance={450000}
-        sunPosition={[120, 80, 100]}
-        turbidity={4}
-        rayleigh={1.2}
-        mieCoefficient={0.002}
-        mieDirectionalG={0.8}
-      />
-      <ambientLight intensity={0.85} color="#ffffff" />
+      {p.sky ? (
+        <Sky
+          distance={450000}
+          sunPosition={p.sky.sunPosition}
+          turbidity={p.sky.turbidity}
+          rayleigh={p.sky.rayleigh}
+          mieCoefficient={p.sky.mieCoefficient}
+          mieDirectionalG={p.sky.mieDirectionalG}
+        />
+      ) : (
+        <color attach="background" args={[p.bgColor]} />
+      )}
+      <ambientLight intensity={p.ambientIntensity} color={p.ambientColor} />
       <directionalLight
-        position={[100, 110, 80]}
-        intensity={2.8}
-        color="#ffffff"
+        position={p.dirPos}
+        intensity={p.dirIntensity}
+        color={p.dirColor}
         castShadow
-        shadow-mapSize={[shadowSize, shadowSize]}
+        shadow-mapSize={SHADOW_MAP_SIZE}
         shadow-camera-near={10}
         shadow-camera-far={260}
         shadow-camera-left={-55}
@@ -103,55 +110,73 @@ function EnvironmentLights() {
         shadow-camera-bottom={-55}
         shadow-bias={-0.0003}
       />
-      <hemisphereLight skyColor="#87ceeb" groundColor="#3a4042" intensity={0.7} />
-      <fog attach="fog" args={['#b8d8ea', 200, 960]} />
-      <Environment preset="city" environmentIntensity={0.85} />
+      <hemisphereLight skyColor={p.hemiSky} groundColor={p.hemiGround} intensity={p.hemiIntensity} />
+      <fog attach="fog" args={p.fog} />
+      {/* Isolated Suspense keeps city/vehicles mounted while HDRI preset switches */}
+      <Suspense fallback={null}>
+        <Environment preset={p.envPreset} environmentIntensity={p.envIntensity} />
+      </Suspense>
     </>
   );
 }
 
 export function GameCanvas() {
-  const handleCreated = ({ gl }) => {
-    const dom = gl.domElement;
-    if (dom) {
-      // Automatic WebGL Context Loss Recovery for Low-End Mobile & Integrated GPUs
-      dom.addEventListener('webglcontextlost', (e) => {
-        e.preventDefault();
-        console.warn('[Z-Race] WebGL context lost. Recovering automatically...');
-      }, false);
+  const domCleanupRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(
+    () => (typeof document === 'undefined' ? true : document.visibilityState !== 'hidden')
+  );
 
-      dom.addEventListener('webglcontextrestored', () => {
-        console.log('[Z-Race] WebGL context restored successfully.');
-      }, false);
-    }
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const onVisibility = () => setIsVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      domCleanupRef.current?.();
+    };
+  }, []);
+
+  const handleCreated = ({ gl }) => {
+    gl.debug.checkShaderErrors = import.meta.env.DEV;
+    const dom = gl.domElement;
+    if (!dom) return;
+    domCleanupRef.current?.();
+    const onLost = (e) => {
+      e.preventDefault();
+      console.warn('[Z-Race] WebGL context lost. Recovering automatically...');
+    };
+    const onRestored = () => {
+      console.log('[Z-Race] WebGL context restored successfully.');
+    };
+    dom.addEventListener('webglcontextlost', onLost, false);
+    dom.addEventListener('webglcontextrestored', onRestored, false);
+    domCleanupRef.current = () => {
+      dom.removeEventListener('webglcontextlost', onLost, false);
+      dom.removeEventListener('webglcontextrestored', onRestored, false);
+    };
   };
 
   return (
     <Canvas
-      resize={{ offsetSize: true }}
-      shadows={{ type: THREE.BasicShadowMap }}
+      frameloop={isVisible ? 'always' : 'never'}
+      resize={RESIZE_CONFIG}
+      shadows={SHADOW_CONFIG}
       dpr={1}
-      camera={{ position: [390.53, 1.8, -36.45], fov: 62, near: 0.2, far: 1200 }}
-      gl={{
-        antialias: true,
-        stencil: false,
-        alpha: false,
-        powerPreference: 'high-performance',
-        toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.15
-      }}
+      camera={CAMERA_CONFIG}
+      gl={GL_CONFIG}
       onCreated={handleCreated}
     >
+      <EnvironmentLights />
+      {/* Core playable world mounts first; heavy ambient layers stream in independently */}
       <Suspense fallback={null}>
-        <EnvironmentLights />
         <CityMap />
         <TireSkidmarks />
         <Car />
-        <RivalCars />
-        <DockedBoats />
-        <CityCrowds />
         <RacingSystem />
       </Suspense>
+      <Suspense fallback={null}><RivalCars /></Suspense>
+      <Suspense fallback={null}><DockedBoats /></Suspense>
+      <Suspense fallback={null}><CityCrowds /></Suspense>
       <CameraRig />
     </Canvas>
   );

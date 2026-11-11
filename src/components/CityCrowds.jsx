@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -16,17 +16,22 @@ const PARIS_CROWD_ZONES = [
   { x0: 640, x1: 980, z0: 76, z1: 108, count: 45, walkRatio: 0.45 }       // South Frigate Bay Esplanade
 ];
 
-const EXCLUDE_SPOTS = [
-  [395, -35, 9],     // Initial Paris Plaza Spawn Berth
-  [386, -49.35, 16], // West Bridge Entry Avenue
-  [430, -20, 14],    // West Helipad
-  [670, 20, 16],     // Central Seahawk Helipad
-  [435, 44, 18],     // Runway 01 (Axis Fighter)
-  [560, 74, 18],     // Runway 02 (Stylized Warplane)
-  [378, -51.6, 10],  // West Marina Ramp Top
-  [755, 116.8, 10],  // South Frigate Ramp Top
-  [1145, 40.8, 10]   // East Tugboat Ramp Top
+const EXCLUDE_SPOTS_SQ = [
+  [395, -35, 81],     // Initial Paris Plaza Spawn Berth (9^2)
+  [386, -49.35, 256], // West Bridge Entry Avenue (16^2)
+  [430, -20, 196],    // West Helipad (14^2)
+  [670, 20, 256],     // Central Seahawk Helipad (16^2)
+  [435, 44, 324],     // Runway 01 (Axis Fighter) (18^2)
+  [560, 74, 324],     // Runway 02 (Stylized Warplane) (18^2)
+  [378, -51.6, 100],  // West Marina Ramp Top (10^2)
+  [755, 116.8, 100],  // South Frigate Ramp Top (10^2)
+  [1145, 40.8, 100]   // East Tugboat Ramp Top (10^2)
 ];
+
+// Compact numeric hash key helpers (eliminates ~50k template strings & .split(',') allocations)
+const packGrid = (gx, gz) => (gx + 512) * 1024 + (gz + 512);
+const packVKey = (x, y, z, scale = 20) =>
+  ((Math.round(x * scale) + 16384) * 32768 + (Math.round(y * scale) + 16384)) * 32768 + (Math.round(z * scale) + 16384);
 
 /**
  * Extracts distinct standing person/couple archetypes from `group_of_people.glb`.
@@ -56,20 +61,16 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
   const CELL = 6;
   const cells = new Map();
   const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
-  const nA = new THREE.Vector3(), nB = new THREE.Vector3(), nC = new THREE.Vector3();
-  const normMat = new THREE.Matrix3();
   const fallbackColor = new THREE.Color('#7a8290');
 
   scene.traverse((child) => {
     if (!child.isMesh || !child.geometry) return;
     const pos = child.geometry.attributes.position;
     if (!pos) return;
-    const normAttr = child.geometry.attributes.normal;
     const idx = child.geometry.index;
     const mat = Array.isArray(child.material) ? child.material[0] : child.material;
     const col = (mat?.name && matColorByName.get(mat.name)) || mat?.color || fallbackColor;
-    const [cr, cg, cb] = [col.r, col.g, col.b];
-    normMat.getNormalMatrix(child.matrixWorld);
+    const cr = col.r, cg = col.g, cb = col.b;
 
     const triCount = idx ? Math.floor(idx.count / 3) : Math.floor(pos.count / 3);
     for (let t = 0; t < triCount; t++) {
@@ -81,31 +82,19 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
       vB.fromBufferAttribute(pos, i1).applyMatrix4(child.matrixWorld);
       vC.fromBufferAttribute(pos, i2).applyMatrix4(child.matrixWorld);
 
-      const cx = (vA.x + vB.x + vC.x) / 3;
       const cy = (vA.y + vB.y + vC.y) / 3;
-      const cz = (vA.z + vB.z + vC.z) / 3;
       if (cy < -6 || cy > 85) continue;
+      const cx = (vA.x + vB.x + vC.x) / 3;
+      const cz = (vA.z + vB.z + vC.z) / 3;
 
-      if (normAttr) {
-        nA.fromBufferAttribute(normAttr, i0).applyMatrix3(normMat).normalize();
-        nB.fromBufferAttribute(normAttr, i1).applyMatrix3(normMat).normalize();
-        nC.fromBufferAttribute(normAttr, i2).applyMatrix3(normMat).normalize();
-      } else {
-        nA.set(0, 1, 0); nB.set(0, 1, 0); nC.set(0, 1, 0);
-      }
-
-      const key = `${Math.floor(cx / CELL)},${Math.floor(cz / CELL)}`;
+      const key = packGrid(Math.floor(cx / CELL), Math.floor(cz / CELL));
       let bucket = cells.get(key);
       if (!bucket) { bucket = []; cells.set(key, bucket); }
-      bucket.push(
-        vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z,
-        nA.x, nA.y, nA.z, nB.x, nB.y, nB.z, nC.x, nC.y, nC.z,
-        cr, cg, cb
-      );
+      bucket.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z, cr, cg, cb);
     }
   });
 
-  // Flood-fill adjacent cells into distinct intact people/couple clusters
+  // Flood-fill adjacent cells into distinct intact people/couple clusters (flat stride 12 floats/tri)
   const visited = new Set();
   const candidates = [];
 
@@ -119,31 +108,33 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
     while (queue.length) {
       const cur = queue.pop();
       const bucket = cells.get(cur);
-      for (let i = 0; i < bucket.length; i += 21) {
-        for (let k = 0; k < 3; k++) {
-          const x = bucket[i + k * 3], y = bucket[i + k * 3 + 1], z = bucket[i + k * 3 + 2];
+      for (let i = 0; i < bucket.length; i += 12) {
+        for (let k = 0; k < 9; k += 3) {
+          const x = bucket[i + k], y = bucket[i + k + 1], z = bucket[i + k + 2];
           if (x < minX) minX = x; if (x > maxX) maxX = x;
           if (y < minY) minY = y; if (y > maxY) maxY = y;
           if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
         }
-        tris.push(bucket.slice(i, i + 21));
+        for (let j = 0; j < 12; j++) tris.push(bucket[i + j]);
       }
-      const [gx, gz] = cur.split(',').map(Number);
+      const gx = Math.floor(cur / 1024) - 512;
+      const gz = (cur % 1024) - 512;
       for (let dx = -1; dx <= 1; dx++) {
         for (let dz = -1; dz <= 1; dz++) {
-          const nk = `${gx + dx},${gz + dz}`;
+          const nk = packGrid(gx + dx, gz + dz);
           if (cells.has(nk) && !visited.has(nk)) { visited.add(nk); queue.push(nk); }
         }
       }
     }
 
+    const triCnt = tris.length / 12;
     const h = maxY - minY, w = maxX - minX, d = maxZ - minZ;
-    if (tris.length >= 300 && tris.length <= 1300 && h >= 55 && h <= 78 && minY > -3 && w < 38 && d < 38) {
-      candidates.push({ tris, minY, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, h });
+    if (triCnt >= 300 && triCnt <= 1300 && h >= 55 && h <= 78 && minY > -3 && w < 38 && d < 38) {
+      candidates.push({ tris, triCnt, minY, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, h });
     }
   }
 
-  candidates.sort((a, b) => a.tris.length - b.tris.length);
+  candidates.sort((a, b) => a.triCnt - b.triCnt);
   const picked = [];
   const step = Math.max(1, Math.floor(candidates.length / maxArchetypes));
   for (let i = 0; i < candidates.length && picked.length < maxArchetypes; i += step) {
@@ -151,65 +142,59 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
   }
 
   const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), p2 = new THREE.Vector3();
-  const e2 = new THREE.Vector3(), fn = new THREE.Vector3();
-  const vKey = (x, y, z) => `${Math.round(x * 20)},${Math.round(y * 20)},${Math.round(z * 20)}`;
+  const e2 = new THREE.Vector3(), fn = new THREE.Vector3(), planeN = new THREE.Vector3();
 
   return picked.map(({ tris, minY, cx, cz, h }) => {
     const scale = 1.68 / Math.max(1, h);
     const widthBoost = 1.14;
 
-    // 1. Identify planar cutout normal and partition front vs back shell triangles
-    const planeN = new THREE.Vector3(0, 0, 1);
-    for (let t = 0; t < tris.length; t++) {
-      const d = tris[t];
-      p0.set(d[0], d[1], d[2]);
-      p1.set(d[3], d[4], d[5]);
-      p2.set(d[6], d[7], d[8]);
+    planeN.set(0, 0, 1);
+    for (let t = 0; t < tris.length; t += 12) {
+      p0.set(tris[t], tris[t + 1], tris[t + 2]);
+      p1.set(tris[t + 3], tris[t + 4], tris[t + 5]);
+      p2.set(tris[t + 6], tris[t + 7], tris[t + 8]);
       fn.subVectors(p1, p0).cross(e2.subVectors(p2, p0));
-      if (fn.lengthSq() > 1e-6) {
-        planeN.copy(fn).normalize();
-        break;
-      }
+      if (fn.lengthSq() > 1e-6) { planeN.copy(fn).normalize(); break; }
     }
 
-    const frontTris = [];
-    const backTris = [];
+    const frontIdx = [];
+    const backIdx = [];
     const edgeCounts = new Map();
     const edgeData = new Map();
     const adj = new Map();
 
-    for (let t = 0; t < tris.length; t++) {
-      const d = tris[t];
-      p0.set(d[0], d[1], d[2]);
-      p1.set(d[3], d[4], d[5]);
-      p2.set(d[6], d[7], d[8]);
+    for (let t = 0; t < tris.length; t += 12) {
+      p0.set(tris[t], tris[t + 1], tris[t + 2]);
+      p1.set(tris[t + 3], tris[t + 4], tris[t + 5]);
+      p2.set(tris[t + 6], tris[t + 7], tris[t + 8]);
       fn.subVectors(p1, p0).cross(e2.subVectors(p2, p0));
       if (fn.dot(planeN) >= 0) {
-        frontTris.push(d);
-        const ks = [vKey(d[0], d[1], d[2]), vKey(d[3], d[4], d[5]), vKey(d[6], d[7], d[8])];
+        frontIdx.push(t);
+        const k0 = packVKey(p0.x, p0.y, p0.z), k1 = packVKey(p1.x, p1.y, p1.z), k2 = packVKey(p2.x, p2.y, p2.z);
+        const ks = [k0, k1, k2];
         for (let e = 0; e < 3; e++) {
           const a = e, b = (e + 1) % 3;
-          if (ks[a] === ks[b]) continue;
-          if (!adj.has(ks[a])) adj.set(ks[a], new Set());
-          if (!adj.has(ks[b])) adj.set(ks[b], new Set());
-          adj.get(ks[a]).add(ks[b]);
-          adj.get(ks[b]).add(ks[a]);
-          const ek = ks[a] < ks[b] ? `${ks[a]}|${ks[b]}` : `${ks[b]}|${ks[a]}`;
+          const ka = ks[a], kb = ks[b];
+          if (ka === kb) continue;
+          let sa = adj.get(ka); if (!sa) { sa = new Set(); adj.set(ka, sa); }
+          let sb = adj.get(kb); if (!sb) { sb = new Set(); adj.set(kb, sb); }
+          sa.add(kb);
+          sb.add(ka);
+          const ek = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
           edgeCounts.set(ek, (edgeCounts.get(ek) || 0) + 1);
           if (!edgeData.has(ek)) {
             edgeData.set(ek, [
-              d[a * 3], d[a * 3 + 1], d[a * 3 + 2], ks[a],
-              d[b * 3], d[b * 3 + 1], d[b * 3 + 2], ks[b],
-              d[18], d[19], d[20]
+              tris[t + a * 3], tris[t + a * 3 + 1], tris[t + a * 3 + 2], ka,
+              tris[t + b * 3], tris[t + b * 3 + 1], tris[t + b * 3 + 2], kb,
+              tris[t + 9], tris[t + 10], tris[t + 11]
             ]);
           }
         }
       } else {
-        backTris.push(d);
+        backIdx.push(t);
       }
     }
 
-    // 2. Compute distance from outer silhouette border so torso swells into a round 3D chest
     const ringDist = new Map();
     const bfsQ = [];
     const boundaryEdges = [];
@@ -234,12 +219,10 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
 
     const halfDepthFor = (k) => {
       const r = ringDist.get(k);
-      if (r === 0) return 0.055;
-      if (r === 1) return 0.12;
-      return 0.16;
+      return r === 0 ? 0.055 : r === 1 ? 0.12 : 0.16;
     };
 
-    const totalTris = frontTris.length + backTris.length + boundaryEdges.length * 2;
+    const totalTris = frontIdx.length + backIdx.length + boundaryEdges.length * 2;
     const positions = new Float32Array(totalTris * 9);
     const colors = new Float32Array(totalTris * 9);
     let triOut = 0;
@@ -254,39 +237,36 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
     };
 
     const emitShell = (list, sign) => {
-      for (let t = 0; t < list.length; t++) {
-        const d = list[t];
-        const [cr, cg, cb] = [d[18], d[19], d[20]];
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        const cr = tris[t + 9], cg = tris[t + 10], cb = tris[t + 11];
         for (let v = 0; v < 3; v++) {
-          const vx = d[v * 3], vy = d[v * 3 + 1], vz = d[v * 3 + 2];
-          const hd = halfDepthFor(vKey(vx, vy, vz)) * sign;
+          const vx = tris[t + v * 3], vy = tris[t + v * 3 + 1], vz = tris[t + v * 3 + 2];
+          const hd = halfDepthFor(packVKey(vx, vy, vz)) * sign;
           pushVertex((triOut * 3 + v) * 3, vx, vy, vz, planeN.x * hd, planeN.y * hd, planeN.z * hd, cr, cg, cb);
         }
         triOut++;
       }
     };
 
-    emitShell(frontTris, 1);
-    emitShell(backTris, -1);
+    emitShell(frontIdx, 1);
+    emitShell(backIdx, -1);
 
-    // 3. Seal silhouette edges with solid outward-wound side walls
     for (let i = 0; i < boundaryEdges.length; i++) {
       const [ax, ay, az, ak, bx, by, bz, bk, cr, cg, cb] = boundaryEdges[i];
-      const ha = halfDepthFor(ak);
-      const hb = halfDepthFor(bk);
+      const ha = halfDepthFor(ak), hb = halfDepthFor(bk);
       const b0 = triOut * 9;
-      pushVertex(b0,      ax, ay, az,  planeN.x * ha,  planeN.y * ha,  planeN.z * ha, cr, cg, cb);
-      pushVertex(b0 + 3,  ax, ay, az, -planeN.x * ha, -planeN.y * ha, -planeN.z * ha, cr, cg, cb);
-      pushVertex(b0 + 6,  bx, by, bz,  planeN.x * hb,  planeN.y * hb,  planeN.z * hb, cr, cg, cb);
+      pushVertex(b0,     ax, ay, az,  planeN.x * ha,  planeN.y * ha,  planeN.z * ha, cr, cg, cb);
+      pushVertex(b0 + 3, ax, ay, az, -planeN.x * ha, -planeN.y * ha, -planeN.z * ha, cr, cg, cb);
+      pushVertex(b0 + 6, bx, by, bz,  planeN.x * hb,  planeN.y * hb,  planeN.z * hb, cr, cg, cb);
       triOut++;
       const b1 = triOut * 9;
-      pushVertex(b1,      ax, ay, az, -planeN.x * ha, -planeN.y * ha, -planeN.z * ha, cr, cg, cb);
-      pushVertex(b1 + 3,  bx, by, bz, -planeN.x * hb, -planeN.y * hb, -planeN.z * hb, cr, cg, cb);
-      pushVertex(b1 + 6,  bx, by, bz,  planeN.x * hb,  planeN.y * hb,  planeN.z * hb, cr, cg, cb);
+      pushVertex(b1,     ax, ay, az, -planeN.x * ha, -planeN.y * ha, -planeN.z * ha, cr, cg, cb);
+      pushVertex(b1 + 3, bx, by, bz, -planeN.x * hb, -planeN.y * hb, -planeN.z * hb, cr, cg, cb);
+      pushVertex(b1 + 6, bx, by, bz,  planeN.x * hb,  planeN.y * hb,  planeN.z * hb, cr, cg, cb);
       triOut++;
     }
 
-    // Compute smooth area-weighted vertex normals across shared 3D vertices
     const normals = new Float32Array(totalTris * 9);
     const nMap = new Map();
     const nKeys = new Array(totalTris * 3);
@@ -299,7 +279,7 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
       for (let v = 0; v < 3; v++) {
         const vi = t * 3 + v;
         const o = vi * 3;
-        const nk = `${Math.round(positions[o] * 500)},${Math.round(positions[o + 1] * 500)},${Math.round(positions[o + 2] * 500)}`;
+        const nk = packVKey(positions[o], positions[o + 1], positions[o + 2], 500);
         nKeys[vi] = nk;
         let acc = nMap.get(nk);
         if (!acc) { acc = [0, 0, 0]; nMap.set(nk, acc); }
@@ -319,31 +299,43 @@ function extractCrowdArchetypes(gltf, maxArchetypes = 8) {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.computeBoundingSphere();
     return geo;
   });
 }
 
+const _crowdMat = new THREE.Matrix4();
+const WALK_ACTIVE_RADIUS_SQ = 165 * 165;
+
+function writePedestrianMatrix(px, py, pz, sinY, cosY, scale, mesh, index) {
+  const me = _crowdMat.elements;
+  const c = cosY * scale, s = sinY * scale;
+  me[0] = c;  me[1] = 0;     me[2] = -s; me[3] = 0;
+  me[4] = 0;  me[5] = scale; me[6] = 0;  me[7] = 0;
+  me[8] = s;  me[9] = 0;     me[10] = c; me[11] = 0;
+  me[12] = px; me[13] = py;  me[14] = pz; me[15] = 1;
+  mesh.setMatrixAt(index, _crowdMat);
+}
+
 /**
  * Lightweight instanced pedestrian crowds populating Paris plazas, parks & sidewalks.
- * Places ~720 pedestrians in social groups & strolling pairs using just 8 InstancedMesh draw calls.
+ * Places ~720 pedestrians in social groups & strolling pairs using 8 InstancedMesh draw calls.
  */
 export function CityCrowds() {
   const gltf = useGLTF(NPC_MODEL_URL);
   const archetypes = useMemo(() => extractCrowdArchetypes(gltf, 8), [gltf]);
-  const sharedMat = useMemo(
-    () => new THREE.MeshLambertMaterial({ vertexColors: true }),
-    []
-  );
+  const sharedMat = useMemo(() => new THREE.MeshLambertMaterial({ vertexColors: true }), []);
 
   const [buckets, setBuckets] = useState([]);
+  const groupRef = useRef();
   const meshRefs = useRef([]);
   const accumRef = useRef(0);
-  const dummy = useMemo(() => new THREE.Object3D(), []);
 
   useEffect(() => {
     return () => {
       archetypes.forEach((g) => g.dispose());
       sharedMat.dispose();
+      meshRefs.current.length = 0;
     };
   }, [archetypes, sharedMat]);
 
@@ -353,25 +345,47 @@ export function CityCrowds() {
     const placeCrowds = () => {
       if (cityColliders.length === 0) return false;
 
+      // Pre-filter Paris ground colliders once via cached world Box3 (avoids testing skyscrapers/West City ~95% faster)
+      const parisColliders = [];
+      for (let i = 0; i < cityColliders.length; i++) {
+        const c = cityColliders[i];
+        const b = c.userData._wBox || (c.userData._wBox = new THREE.Box3().setFromObject(c));
+        if (b.max.x >= 380 && b.min.x <= 1170 && b.max.z >= -390 && b.min.z <= 115 && b.max.y >= -0.35) {
+          parisColliders.push(c);
+        }
+      }
+      if (parisColliders.length === 0) return false;
+
       let seed = 4209;
       const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
       const rc = new THREE.Raycaster();
       const down = new THREE.Vector3(0, -1, 0);
       const origin = new THREE.Vector3();
       const tmpNorm = new THREE.Vector3();
+      const hitTargets = [];
+      const hitsBuf = [];
 
       const probeGround = (x, z) => {
-        if (x < 340 && Math.abs(z + 49.35) < 7.5) return null;
-        for (let i = 0; i < EXCLUDE_SPOTS.length; i++) {
-          const [ex, ez, rad] = EXCLUDE_SPOTS[i];
-          if (Math.hypot(x - ex, z - ez) < rad) return null;
+        for (let i = 0; i < EXCLUDE_SPOTS_SQ.length; i++) {
+          const [ex, ez, radSq] = EXCLUDE_SPOTS_SQ[i];
+          const dx = x - ex, dz = z - ez;
+          if (dx * dx + dz * dz < radSq) return null;
         }
+        hitTargets.length = 0;
+        for (let i = 0; i < parisColliders.length; i++) {
+          const c = parisColliders[i];
+          const b = c.userData._wBox;
+          if (x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z) hitTargets.push(c);
+        }
+        if (hitTargets.length === 0) return null;
+
         origin.set(x, 45, z);
         rc.set(origin, down);
         rc.far = 50;
-        const hits = rc.intersectObjects(cityColliders, false);
-        if (!hits.length) return null;
-        const h = hits[0];
+        hitsBuf.length = 0;
+        rc.intersectObjects(hitTargets, false, hitsBuf);
+        if (!hitsBuf.length) return null;
+        const h = hitsBuf[0];
         if (h.point.y < -0.25 || h.point.y > 0.45) return null;
         const rawN = h.normal || h.face?.normal;
         if (!rawN) return null;
@@ -382,7 +396,6 @@ export function CityCrowds() {
         if (objName.includes('qiang') || objName.includes('tiezhalan') || matName.includes('qiang') || matName.includes('tiezhalan')) {
           return null;
         }
-        // Keep pedestrians on sidewalks (`lujian`), lawns (`cao`), and plazas — off track tarmac (`shaidao`)
         if (objName.includes('shaidao') && !matName.includes('lujian') && !matName.includes('cao') && !matName.includes('dibiao_13')) {
           return null;
         }
@@ -399,7 +412,6 @@ export function CityCrowds() {
           const ay = probeGround(ax, az);
           if (ay === null) continue;
 
-          // 48% spawn in tight 2-3 person social huddles facing inward; others stroll/stand along paths
           const isHuddle = rand() < 0.48 && placed + 2 <= zone.count;
           if (isHuddle) {
             const members = 2 + (rand() < 0.45 ? 1 : 0);
@@ -410,14 +422,12 @@ export function CityCrowds() {
               const pz = az + Math.sin(ang) * rad;
               const py = probeGround(px, pz);
               if (py === null || Math.abs(py - ay) > 0.25) continue;
-              const archIdx = Math.floor(rand() * archetypes.length);
-              grouped[archIdx].push({
+              const rotY = Math.atan2(ax - px, az - pz);
+              grouped[Math.floor(rand() * archetypes.length)].push({
                 x: px, y: py, z: pz,
-                rotY: Math.atan2(ax - px, az - pz),
+                dirX: Math.sin(rotY), dirZ: Math.cos(rotY),
                 scale: 0.94 + rand() * 0.14,
-                walkLen: 0, dirX: 0, dirZ: 1,
-                phase: rand() * Math.PI * 2,
-                speed: 0.75 + rand() * 0.55
+                walkLen: 0, phase: 0, speed: 0
               });
               placed++;
             }
@@ -425,21 +435,19 @@ export function CityCrowds() {
           }
 
           const angle = rand() * Math.PI * 2;
+          const dirX = Math.sin(angle), dirZ = Math.cos(angle);
           let walkLen = 0;
           if (rand() < zone.walkRatio) {
             const testDist = 5.0 + rand() * 6.0;
-            const endY = probeGround(ax + Math.sin(angle) * testDist, az + Math.cos(angle) * testDist);
+            const endY = probeGround(ax + dirX * testDist, az + dirZ * testDist);
             if (endY !== null && Math.abs(endY - ay) < 0.25) walkLen = testDist;
           }
 
-          const archIdx = Math.floor(rand() * archetypes.length);
-          grouped[archIdx].push({
+          grouped[Math.floor(rand() * archetypes.length)].push({
             x: ax, y: ay, z: az,
-            rotY: angle,
+            dirX, dirZ,
             scale: 0.94 + rand() * 0.14,
             walkLen,
-            dirX: Math.sin(angle),
-            dirZ: Math.cos(angle),
             phase: rand() * Math.PI * 2,
             speed: 0.75 + rand() * 0.65
           });
@@ -451,12 +459,11 @@ export function CityCrowds() {
       return true;
     };
 
-    if (!placeCrowds()) {
-      const timer = setInterval(() => {
-        if (placeCrowds()) clearInterval(timer);
-      }, 300);
-      return () => clearInterval(timer);
-    }
+    if (placeCrowds()) return undefined;
+    const timer = setInterval(() => {
+      if (placeCrowds()) clearInterval(timer);
+    }, 300);
+    return () => clearInterval(timer);
   }, [archetypes.length]);
 
   useEffect(() => {
@@ -465,19 +472,24 @@ export function CityCrowds() {
       if (!mesh || !list.length) return;
       for (let i = 0; i < list.length; i++) {
         const p = list[i];
-        dummy.position.set(p.x, p.y, p.z);
-        dummy.rotation.set(0, p.rotY, 0);
-        dummy.scale.setScalar(p.scale);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
+        writePedestrianMatrix(p.x, p.y, p.z, p.dirX, p.dirZ, p.scale, mesh, i);
       }
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      if (mesh.boundingSphere) mesh.boundingSphere.radius += 14;
     });
-  }, [buckets, dummy]);
+  }, [buckets]);
 
-  // Throttled ~22Hz lightweight stroll & idle sway animation
-  useFrame(({ clock }, delta) => {
-    if (buckets.length === 0) return;
+  // Distance-culled ~22Hz stroll animation; skips GPU updates completely when player is outside Paris
+  useFrame(({ clock, camera }, delta) => {
+    const grp = groupRef.current;
+    if (!grp || buckets.length === 0) return;
+
+    const camX = camera.position.x, camZ = camera.position.z;
+    const inParisView = camX >= 220;
+    if (grp.visible !== inParisView) grp.visible = inParisView;
+    if (!inParisView) return;
+
     accumRef.current += delta;
     if (accumRef.current < 0.045) return;
     accumRef.current = 0;
@@ -492,20 +504,21 @@ export function CityCrowds() {
       for (let i = 0; i < list.length; i++) {
         const p = list[i];
         if (p.walkLen <= 0) continue;
+        const dx = p.x - camX, dz = p.z - camZ;
+        if (dx * dx + dz * dz > WALK_ACTIVE_RADIUS_SQ) continue;
+
         moved = true;
         const cycle = (t * p.speed + p.phase) % (Math.PI * 2);
         const pingPong = 0.5 - 0.5 * Math.cos(cycle);
-        const heading = Math.sin(cycle) >= 0 ? p.rotY : p.rotY + Math.PI;
+        const sign = Math.sin(cycle) >= 0 ? 1 : -1;
         const stepBob = Math.abs(Math.sin(t * p.speed * 4.5 + p.phase)) * 0.045;
-        dummy.position.set(
+        writePedestrianMatrix(
           p.x + p.dirX * p.walkLen * pingPong,
           p.y + stepBob,
-          p.z + p.dirZ * p.walkLen * pingPong
+          p.z + p.dirZ * p.walkLen * pingPong,
+          p.dirX * sign, p.dirZ * sign, p.scale,
+          mesh, i
         );
-        dummy.rotation.set(0, heading, 0);
-        dummy.scale.setScalar(p.scale);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
       }
       if (moved) mesh.instanceMatrix.needsUpdate = true;
     }
@@ -514,7 +527,7 @@ export function CityCrowds() {
   if (archetypes.length === 0 || buckets.length === 0) return null;
 
   return (
-    <group>
+    <group ref={groupRef}>
       {archetypes.map((geo, idx) => {
         const count = buckets[idx]?.length || 0;
         if (count === 0) return null;
@@ -523,12 +536,9 @@ export function CityCrowds() {
             key={idx}
             ref={(el) => { meshRefs.current[idx] = el; }}
             args={[geo, sharedMat, count]}
-            frustumCulled={false}
           />
         );
       })}
     </group>
   );
 }
-
-useGLTF.preload(NPC_MODEL_URL);

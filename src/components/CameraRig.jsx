@@ -1,147 +1,180 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
 import { inputState } from './Car';
 
-// 3 Dedicated Camera Angles: Close, Far, Aerial
+const TWO_PI = Math.PI * 2;
+const THREE_PI = Math.PI * 3;
+
+// 3 Dedicated Camera Angles: Close, Far, Aerial (frozen singletons, 0 per-frame GC)
+const CAMERA_DEFAULTS = {
+  close: Object.freeze({ dist: 4.7, height: 1.45, fov: 56, lookHeight: 0.85 }),
+  far: Object.freeze({ dist: 6.8, height: 1.85, fov: 58, lookHeight: 0.95 }),
+  aerial: Object.freeze({ dist: 8.6, height: 3.4, fov: 60, lookHeight: 0.65 })
+};
+
 export function getCameraDefaults(mode) {
-  if (mode === 'far') return { dist: 6.8, height: 1.85, fov: 58, lookHeight: 0.95 };
-  if (mode === 'aerial') return { dist: 8.6, height: 3.4, fov: 60, lookHeight: 0.65 };
-  return { dist: 4.7, height: 1.45, fov: 56, lookHeight: 0.85 };
+  return CAMERA_DEFAULTS[mode] || CAMERA_DEFAULTS.close;
 }
 
 export function CameraRig() {
-  const cameraMode = useGameStore((s) => s.cameraMode);
-  const vehicleCamScale = useGameStore((s) => s.vehicleCamScale);
   const { camera, gl } = useThree();
 
-  const currentCamPos = useRef(new THREE.Vector3(390.53, 1.8, -36.45));
-  const currentLookAt = useRef(new THREE.Vector3(396.43, 1.2, -34.54));
-  const math = useRef({
-    carPosVec: new THREE.Vector3(),
-    targetCamPos: new THREE.Vector3(),
-    targetLookAt: new THREE.Vector3()
-  });
-
-  const initialCfg = getCameraDefaults(cameraMode);
-  const orbit = useRef({
-    yaw: 0,
-    pitch: 0,
-    distance: initialCfg.dist,
-    targetDist: initialCfg.dist,
-    isDragging: false,
-    lastInteractionTime: 0,
-    prevX: 0,
-    prevY: 0,
-    activeTouches: new Map(),
-    initialPinchDist: 0,
-    initialPinchTargetDist: initialCfg.dist
-  });
-
-  useEffect(() => {
+  const rig = useRef(null);
+  if (!rig.current) {
+    const { cameraMode, vehicleCamScale } = useGameStore.getState();
     const scale = vehicleCamScale || 1.0;
-    orbit.current.targetDist = getCameraDefaults(cameraMode).dist * scale;
-  }, [cameraMode, vehicleCamScale]);
+    const cfg = getCameraDefaults(cameraMode);
+    rig.current = {
+      camPos: new THREE.Vector3(390.53, 1.8, -36.45),
+      lookAt: new THREE.Vector3(396.43, 1.2, -34.54),
+      targetPos: new THREE.Vector3(),
+      targetLook: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      distance: cfg.dist * scale,
+      targetDist: cfg.dist * scale,
+      lastMode: cameraMode,
+      lastScale: scale,
+      isDragging: false,
+      lastInteractionTime: 0,
+      prevX: 0,
+      prevY: 0,
+      touches: [],
+      initialPinchDist: 0,
+      initialPinchTargetDist: cfg.dist * scale,
+      isRotated: false
+    };
+  }
 
   useEffect(() => {
     const dom = gl.domElement;
     if (!dom) return;
     dom.style.touchAction = 'none';
 
+    const r = rig.current;
+    const mq = window.matchMedia('(orientation: portrait) and (max-width: 1024px)');
+    r.isRotated = mq.matches;
+    const onMqChange = (e) => { r.isRotated = e.matches; };
+    if (mq.addEventListener) mq.addEventListener('change', onMqChange);
+    else if (mq.addListener) mq.addListener(onMqChange);
+
+    const clampDist = (dist, scale) => THREE.MathUtils.clamp(dist, 1.8 * scale, 12.0 * scale);
+    const getCamScale = () => useGameStore.getState().vehicleCamScale || 1.0;
+    const findTouch = (id) => r.touches.findIndex((t) => t.id === id);
+
     const onPointerDown = (e) => {
       if (e.target !== dom && !dom.contains(e.target)) return;
-      orbit.current.activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (orbit.current.activeTouches.size === 1) {
-        orbit.current.isDragging = true;
-        orbit.current.prevX = e.clientX;
-        orbit.current.prevY = e.clientY;
-      } else if (orbit.current.activeTouches.size === 2) {
-        const [t1, t2] = Array.from(orbit.current.activeTouches.values());
-        orbit.current.initialPinchDist = Math.hypot(t1.x - t2.x, t1.y - t2.y);
-        orbit.current.initialPinchTargetDist = orbit.current.targetDist;
+      const idx = findTouch(e.pointerId);
+      if (idx >= 0) {
+        r.touches[idx].x = e.clientX;
+        r.touches[idx].y = e.clientY;
+      } else if (r.touches.length < 4) {
+        r.touches.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
       }
-      orbit.current.lastInteractionTime = performance.now();
+      if (r.touches.length === 1) {
+        r.isDragging = true;
+        r.prevX = e.clientX;
+        r.prevY = e.clientY;
+      } else if (r.touches.length === 2) {
+        const [t1, t2] = r.touches;
+        r.initialPinchDist = Math.hypot(t1.x - t2.x, t1.y - t2.y);
+        r.initialPinchTargetDist = r.targetDist;
+      }
+      r.lastInteractionTime = performance.now();
     };
 
     const onPointerMove = (e) => {
-      const orb = orbit.current;
-      if (!orb.isDragging && orb.activeTouches.size === 0) return;
-      if (orb.activeTouches.has(e.pointerId)) orb.activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!r.isDragging && r.touches.length === 0) return;
+      const idx = findTouch(e.pointerId);
+      if (idx >= 0) {
+        r.touches[idx].x = e.clientX;
+        r.touches[idx].y = e.clientY;
+      }
 
-      if (orb.activeTouches.size === 1 && orb.isDragging) {
-        const isRotated = window.matchMedia('(orientation: portrait) and (max-width: 1024px)').matches;
-        const dx = isRotated ? (e.clientY - orb.prevY) : (e.clientX - orb.prevX);
-        const dy = isRotated ? -(e.clientX - orb.prevX) : (e.clientY - orb.prevY);
-        orb.yaw -= dx * 0.0055;
-        orb.pitch = THREE.MathUtils.clamp(orb.pitch + dy * 0.0045, -0.45, 0.95);
-        orb.prevX = e.clientX;
-        orb.prevY = e.clientY;
-        orb.lastInteractionTime = performance.now();
-      } else if (orb.activeTouches.size === 2 && orb.initialPinchDist > 0) {
-        const scale = useGameStore.getState().vehicleCamScale || 1.0;
-        const [t1, t2] = Array.from(orb.activeTouches.values());
+      if (r.touches.length === 1 && r.isDragging) {
+        const dx = r.isRotated ? (e.clientY - r.prevY) : (e.clientX - r.prevX);
+        const dy = r.isRotated ? -(e.clientX - r.prevX) : (e.clientY - r.prevY);
+        r.yaw -= dx * 0.0055;
+        r.pitch = THREE.MathUtils.clamp(r.pitch + dy * 0.0045, -0.45, 0.95);
+        r.prevX = e.clientX;
+        r.prevY = e.clientY;
+        r.lastInteractionTime = performance.now();
+      } else if (r.touches.length === 2 && r.initialPinchDist > 0) {
+        const [t1, t2] = r.touches;
         const pinch = Math.hypot(t1.x - t2.x, t1.y - t2.y);
-        orb.targetDist = THREE.MathUtils.clamp(orb.initialPinchTargetDist * (orb.initialPinchDist / Math.max(1, pinch)), 1.8 * scale, 12.0 * scale);
-        orb.lastInteractionTime = performance.now();
+        r.targetDist = clampDist(r.initialPinchTargetDist * (r.initialPinchDist / Math.max(1, pinch)), getCamScale());
+        r.lastInteractionTime = performance.now();
       }
     };
 
     const onPointerUp = (e) => {
-      const orb = orbit.current;
-      orb.activeTouches.delete(e.pointerId);
-      if (orb.activeTouches.size === 0) {
-        orb.isDragging = false;
-      } else if (orb.activeTouches.size === 1) {
-        const remaining = Array.from(orb.activeTouches.values())[0];
-        orb.prevX = remaining.x;
-        orb.prevY = remaining.y;
+      const idx = findTouch(e.pointerId);
+      if (idx >= 0) r.touches.splice(idx, 1);
+      if (r.touches.length === 0) {
+        r.isDragging = false;
+      } else if (r.touches.length === 1) {
+        r.prevX = r.touches[0].x;
+        r.prevY = r.touches[0].y;
       }
-      orb.lastInteractionTime = performance.now();
+      r.lastInteractionTime = performance.now();
     };
 
     const onWheel = (e) => {
       e.preventDefault();
-      const scale = useGameStore.getState().vehicleCamScale || 1.0;
-      orbit.current.targetDist = THREE.MathUtils.clamp(orbit.current.targetDist * (e.deltaY > 0 ? 1.10 : 0.90), 1.8 * scale, 12.0 * scale);
-      orbit.current.lastInteractionTime = performance.now();
+      r.targetDist = clampDist(r.targetDist * (e.deltaY > 0 ? 1.10 : 0.90), getCamScale());
+      r.lastInteractionTime = performance.now();
     };
 
     const onDblClick = () => {
-      const scale = useGameStore.getState().vehicleCamScale || 1.0;
-      orbit.current.yaw = 0;
-      orbit.current.pitch = 0;
-      orbit.current.targetDist = getCameraDefaults(cameraMode).dist * scale;
+      r.yaw = 0;
+      r.pitch = 0;
+      r.targetDist = getCameraDefaults(useGameStore.getState().cameraMode).dist * getCamScale();
+    };
+
+    const onBlur = () => {
+      r.touches.length = 0;
+      r.isDragging = false;
     };
 
     dom.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('blur', onBlur);
     dom.addEventListener('wheel', onWheel, { passive: false });
     dom.addEventListener('dblclick', onDblClick);
 
     return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onMqChange);
+      else if (mq.removeListener) mq.removeListener(onMqChange);
       dom.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('blur', onBlur);
       dom.removeEventListener('wheel', onWheel);
       dom.removeEventListener('dblclick', onDblClick);
     };
-  }, [gl, cameraMode]);
+  }, [gl]);
 
-  // Main 60-120 FPS Camera Dynamics Loop
+  // Main 60-120 FPS Camera Dynamics Loop (Zero GC allocations)
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
-    const m = math.current;
-    const orb = orbit.current;
-    const { carPosition, carRotation, speed, isNitroActive, vehicleCamScale: storeCamScale } = useGameStore.getState();
+    const r = rig.current;
+    const { carPosition, carRotation, speed, isNitroActive, cameraMode, vehicleCamScale } = useGameStore.getState();
 
-    m.carPosVec.set(carPosition[0], carPosition[1], carPosition[2]);
-
-    const camScale = storeCamScale || 1.0;
+    const cx = carPosition[0], cy = carPosition[1], cz = carPosition[2];
+    const camScale = vehicleCamScale || 1.0;
     const camCfg = getCameraDefaults(cameraMode);
+
+    if (r.lastMode !== cameraMode || r.lastScale !== camScale) {
+      r.lastMode = cameraMode;
+      r.lastScale = camScale;
+      r.targetDist = camCfg.dist * camScale;
+    }
+
     const scaledDist = camCfg.dist * camScale;
     const scaledHeight = camCfg.height * (1 + (camScale - 1) * 0.68);
     const scaledLookHeight = camCfg.lookHeight * (1 + (camScale - 1) * 0.42);
@@ -149,55 +182,55 @@ export function CameraRig() {
     const isDriving = speedKmH > 2.5 || inputState.forward || inputState.backward || inputState.left || inputState.right;
 
     // Auto-recenter when driving
-    if (!orb.isDragging && isDriving && (performance.now() - orb.lastInteractionTime) > 300) {
-      const yawDiff = Math.atan2(Math.sin(orb.yaw), Math.cos(orb.yaw));
+    if (!r.isDragging && isDriving && (performance.now() - r.lastInteractionTime) > 300) {
+      const yawDiff = ((r.yaw % TWO_PI) + THREE_PI) % TWO_PI - Math.PI;
       const returnSpeed = 3.2 + Math.min(speedKmH / 30, 4.5);
-      orb.yaw = THREE.MathUtils.lerp(yawDiff, 0, returnSpeed * dt);
-      orb.pitch = THREE.MathUtils.lerp(orb.pitch, 0, 3.8 * dt);
-      orb.targetDist = THREE.MathUtils.lerp(orb.targetDist, scaledDist, 3.2 * dt);
+      r.yaw = yawDiff * (1 - Math.min(1, returnSpeed * dt));
+      r.pitch = THREE.MathUtils.lerp(r.pitch, 0, Math.min(1, 3.8 * dt));
+      r.targetDist = THREE.MathUtils.lerp(r.targetDist, scaledDist, Math.min(1, 3.2 * dt));
     }
 
-    orb.distance = THREE.MathUtils.lerp(orb.distance, orb.targetDist, 10.0 * dt);
+    r.distance = THREE.MathUtils.lerp(r.distance, r.targetDist, Math.min(1, 10.0 * dt));
 
-    const camAzimuth = carRotation + Math.PI + orb.yaw;
-    const horizDist = orb.distance * Math.cos(orb.pitch);
-    const vertDist = orb.distance * Math.sin(orb.pitch);
-    const clampedY = Math.max(m.carPosVec.y + 0.35 * camScale, m.carPosVec.y + scaledHeight + vertDist);
+    const camAzimuth = carRotation + Math.PI + r.yaw;
+    const horizDist = r.distance * Math.cos(r.pitch);
+    const vertDist = r.distance * Math.sin(r.pitch);
+    const clampedY = Math.max(cy + 0.35 * camScale, cy + scaledHeight + vertDist);
 
-    m.targetCamPos.set(
-      m.carPosVec.x + horizDist * Math.sin(camAzimuth),
+    r.targetPos.set(
+      cx + horizDist * Math.sin(camAzimuth),
       clampedY,
-      m.carPosVec.z + horizDist * Math.cos(camAzimuth)
+      cz + horizDist * Math.cos(camAzimuth)
     );
 
-    m.targetLookAt.set(
-      m.carPosVec.x + 0.3 * Math.sin(carRotation),
-      m.carPosVec.y + scaledLookHeight + Math.max(0, vertDist * 0.2),
-      m.carPosVec.z + 0.3 * Math.cos(carRotation)
+    r.targetLook.set(
+      cx + 0.3 * Math.sin(carRotation),
+      cy + scaledLookHeight + Math.max(0, vertDist * 0.2),
+      cz + 0.3 * Math.cos(carRotation)
     );
 
     // Dynamic FOV (Only update projection matrix when FOV changes)
     const targetFov = camCfg.fov + Math.min(1.0, speed / 240) * 3.5 + (isNitroActive ? 2.5 : 0);
-    const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, 6.0 * dt);
+    const newFov = THREE.MathUtils.lerp(camera.fov, targetFov, Math.min(1, 6.0 * dt));
     if (Math.abs(camera.fov - newFov) > 0.015) {
       camera.fov = newFov;
       camera.updateProjectionMatrix();
     }
 
-    const speedFactor = Math.min(1.0, speedKmH / 160);
-    const camLerpSpeed = orb.isDragging ? 22.0 : 14.0 + speedFactor * 14.0;
-    const lookLerpSpeed = orb.isDragging ? 24.0 : 18.0 + speedFactor * 12.0;
-
-    if (currentCamPos.current.distanceTo(m.targetCamPos) > 35 * camScale) {
-      currentCamPos.current.copy(m.targetCamPos);
-      currentLookAt.current.copy(m.targetLookAt);
+    const snapLimit = 35 * camScale;
+    if (r.camPos.distanceToSquared(r.targetPos) > snapLimit * snapLimit) {
+      r.camPos.copy(r.targetPos);
+      r.lookAt.copy(r.targetLook);
     } else {
-      currentCamPos.current.lerp(m.targetCamPos, camLerpSpeed * dt);
-      currentLookAt.current.lerp(m.targetLookAt, lookLerpSpeed * dt);
+      const speedFactor = Math.min(1.0, speedKmH / 160);
+      const camLerp = Math.min(1, (r.isDragging ? 22.0 : 14.0 + speedFactor * 14.0) * dt);
+      const lookLerp = Math.min(1, (r.isDragging ? 24.0 : 18.0 + speedFactor * 12.0) * dt);
+      r.camPos.lerp(r.targetPos, camLerp);
+      r.lookAt.lerp(r.targetLook, lookLerp);
     }
 
-    camera.position.copy(currentCamPos.current);
-    camera.lookAt(currentLookAt.current);
+    camera.position.copy(r.camPos);
+    camera.lookAt(r.lookAt);
   });
 
   return null;

@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { useGameStore } from '../store/gameStore';
-import { WATER_SURFACE_Y } from '../utils/waterSystem';
+import { memo, useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   Car,
   Ship,
@@ -13,329 +12,299 @@ import {
   Moon,
   RotateCcw,
   Flag,
-  Wrench,
   HelpCircle,
   X,
   Keyboard,
   MapPin
 } from 'lucide-react';
+import { useGameStore } from '../store/gameStore';
+import { WATER_SURFACE_Y } from '../utils/waterSystem';
 import { CarCustomizerModal } from './CarCustomizerModal';
 import { soundManager } from '../utils/AudioSystem';
 
-export function ControlsOverlay() {
-  const cameraMode = useGameStore((s) => s.cameraMode);
-  const cycleCameraMode = useGameStore((s) => s.cycleCameraMode);
-  const timeOfDay = useGameStore((s) => s.timeOfDay);
-  const cycleTimeOfDay = useGameStore((s) => s.cycleTimeOfDay);
-  const soundEnabled = useGameStore((s) => s.soundEnabled);
-  const toggleSound = useGameStore((s) => s.toggleSound);
-  const triggerReset = useGameStore((s) => s.triggerReset);
-  const raceActive = useGameStore((s) => s.raceActive);
-  const startRace = useGameStore((s) => s.startRace);
-  const stopRace = useGameStore((s) => s.stopRace);
-  const teleportTo = useGameStore((s) => s.teleportTo);
-  const carName = useGameStore((s) => s.carName);
-  const carBrand = useGameStore((s) => s.carBrand);
-  const vehicleType = useGameStore((s) => s.vehicleType);
+const TIME_ICONS = {
+  day: <Sun size={18} color="#ffbb00" />,
+  sunset: <Sunset size={18} color="#ff7733" />,
+  night: <Moon size={18} color="#88aaff" />
+};
 
+const ICON_VOLUME_ON = <Volume2 size={18} />;
+const ICON_VOLUME_OFF = <VolumeX size={18} color="#ff4455" />;
+
+const HELP_CONTROLS = [
+  { keys: ['W', '▲'], desc: 'Accelerate / Gas Pedal' },
+  { keys: ['S', '▼'], desc: 'Brake / Reverse Gear' },
+  { keys: ['A', 'D', '◀', '▶'], desc: 'Steer Left & Right' },
+  { keys: ['SPACE'], wide: true, desc: 'Drift / Heli Climb Up' },
+  { keys: ['Q', 'Z'], desc: 'Helicopter Descend / Land' },
+  { keys: ['SHIFT'], wide: true, desc: 'Nitro Boost Surge' },
+  { keys: ['E'], desc: 'Board Boat / Heli or Return to Car' },
+  { keys: ['R'], desc: 'Reset Car onto Road' },
+  { keys: ['C'], desc: 'Cycle 3 Camera Angles (Close, Far, Aerial)' },
+  { keys: ['T'], desc: 'Cycle Time (Day, Sunset, Cyberpunk Night)' },
+  { keys: ['M'], desc: 'Mute / Unmute Procedural Sound' },
+  { keys: ['MOUSE DRAG'], wide: true, desc: '360° Orbit Camera (Inspect Car from Any Angle)' },
+  { keys: ['WHEEL / PINCH'], wide: true, desc: 'Zoom In & Out Smoothly' },
+  { keys: ['DRIVE (W / ▲)'], wide: true, desc: 'Auto-Recenter Camera Smoothly Behind Car' },
+  { keys: ['2x CLICK'], wide: true, desc: 'Instant Camera Snap to Rear' }
+];
+
+const MODAL_FOOTER_STYLE = { flexDirection: 'column', gap: '10px' };
+const MODAL_CREDIT_STYLE = { fontSize: '11px', color: '#8fa0b5', textAlign: 'center', marginTop: '2px' };
+const MODAL_AUTHOR_STYLE = { color: 'var(--primary-cyan)', fontWeight: 700, textDecoration: 'none' };
+const MODAL_SITE_STYLE = { color: '#00ff88', textDecoration: 'none' };
+
+const reloadGame = () => window.location.reload();
+const stopPropagation = (e) => e.stopPropagation();
+
+const wakeAudio = () => {
+  soundManager.init();
+  soundManager.resume();
+};
+
+const handleToggleRace = () => {
+  wakeAudio();
+  const st = useGameStore.getState();
+  if (st.raceActive) st.stopRace();
+  else st.startRace();
+};
+
+const handleFastTravel = () => {
+  wakeAudio();
+  const st = useGameStore.getState();
+  if (st.raceActive) st.stopRace();
+  const [curX, , curZ] = st.carPosition;
+  if (st.vehicleType === 'boat') {
+    const goingToBay = curZ < 60;
+    st.teleportTo(goingToBay ? [762, WATER_SURFACE_Y, 174] : [405, WATER_SURFACE_Y, -96], Math.PI / 2);
+  } else {
+    const goingToParis = curX < 330;
+    const yAlt = st.vehicleType === 'helicopter' ? 6.0 : 0.3;
+    st.teleportTo(goingToParis ? [395, yAlt, -35] : [-3.0, yAlt, 10.0], goingToParis ? Math.PI * 0.4 : 0);
+  }
+};
+
+const handleCycleCamera = () => useGameStore.getState().cycleCameraMode();
+const handleCycleTime = () => useGameStore.getState().cycleTimeOfDay();
+const handleTriggerReset = () => useGameStore.getState().triggerReset();
+const handleToggleSound = () => {
+  wakeAudio();
+  useGameStore.getState().toggleSound();
+};
+
+const BrandGroup = memo(function BrandGroup() {
+  return (
+    <div className="brand-group">
+      <span className="brand-badge" onClick={reloadGame} title="Reload Game">
+        Zr
+      </span>
+      <h1 className="brand-title" onClick={reloadGame} title="Reload Game">
+        Z-RACE
+      </h1>
+      <a
+        href="https://zeesu-royalist.vercel.app"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="brand-sub"
+        title="Visit Zeesu Royalist"
+      >
+        Zeesu Royalist
+      </a>
+    </div>
+  );
+});
+
+const HeaderActions = memo(function HeaderActions({ onOpenGarage, onOpenHelp }) {
+  const {
+    cameraMode,
+    timeOfDay,
+    soundEnabled,
+    raceActive,
+    carName,
+    carBrand,
+    vehicleType,
+    inEastZone
+  } = useGameStore(
+    useShallow((s) => {
+      const pos = s.teleportTarget?.pos || s.carPosition;
+      return {
+        cameraMode: s.cameraMode,
+        timeOfDay: s.timeOfDay,
+        soundEnabled: s.soundEnabled,
+        raceActive: s.raceActive,
+        carName: s.carName,
+        carBrand: s.carBrand,
+        vehicleType: s.vehicleType,
+        inEastZone: s.vehicleType === 'boat' ? pos[2] >= 60 : pos[0] >= 330
+      };
+    })
+  );
+
+  const isBoat = vehicleType === 'boat';
+
+  return (
+    <div className="header-actions">
+      {/* Race Mode Toggle */}
+      <button
+        className={`action-pill ${raceActive ? 'race-active-pill' : 'race-idle-pill'}`}
+        onClick={handleToggleRace}
+        title={raceActive ? 'End Race' : 'Start Circuit Race'}
+      >
+        <Flag size={16} />
+        <span>{raceActive ? 'ABORT RACE' : 'START RACE'}</span>
+      </button>
+
+      {/* Garage / Vehicle, Marina & Helipad Selector */}
+      <button
+        className="action-pill car-selector-pill"
+        onClick={onOpenGarage}
+        title={`Switch Vehicle / Boat / Helicopter (${carName})`}
+      >
+        {vehicleType === 'helicopter' ? <Fan size={16} /> : isBoat ? <Ship size={16} /> : <Car size={16} />}
+        <span>{(carBrand || 'MCLAREN').toUpperCase()}</span>
+      </button>
+
+      {/* Fast Travel between Districts / Harbor Zones */}
+      <button
+        className="action-pill"
+        onClick={handleFastTravel}
+        title={
+          isBoat
+            ? 'Jump between Seine Marina & Open Harbor Bay'
+            : (inEastZone ? 'Return to Main City' : 'Teleport to Paris District (or drive East Highway)')
+        }
+      >
+        <MapPin size={15} />
+        <span>{isBoat ? (inEastZone ? 'MARINA' : 'OPEN BAY') : (inEastZone ? 'CITY' : 'PARIS')}</span>
+      </button>
+
+      {/* Camera View Switcher (Icon Only) */}
+      <button
+        className="icon-action-btn"
+        onClick={handleCycleCamera}
+        title={`Switch Camera: ${cameraMode.toUpperCase()} (Press C)`}
+      >
+        <Camera size={18} />
+      </button>
+
+      {/* Time of Day / Weather Switcher (Icon Only) */}
+      <button
+        className="icon-action-btn"
+        onClick={handleCycleTime}
+        title={`Toggle Weather/Time: ${timeOfDay.toUpperCase()} (Press T)`}
+      >
+        {TIME_ICONS[timeOfDay] || TIME_ICONS.night}
+      </button>
+
+      {/* Sound Toggle */}
+      <button
+        className="icon-action-btn"
+        onClick={handleToggleSound}
+        title="Toggle Audio (Press M)"
+      >
+        {soundEnabled ? ICON_VOLUME_ON : ICON_VOLUME_OFF}
+      </button>
+
+      {/* Reset Car */}
+      <button
+        className="icon-action-btn reset-btn"
+        onClick={handleTriggerReset}
+        title="Reset Car Upright (Press R)"
+      >
+        <RotateCcw size={18} />
+      </button>
+
+      {/* Controls Help */}
+      <button
+        className="icon-action-btn"
+        onClick={onOpenHelp}
+        title="Controls & Instructions"
+      >
+        <HelpCircle size={18} />
+      </button>
+    </div>
+  );
+});
+
+const HelpModal = memo(function HelpModal({ onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card help-modal" onClick={stopPropagation}>
+        <div className="modal-header">
+          <div className="modal-title-row">
+            <Keyboard className="text-cyan" size={24} />
+            <h2>GAME CONTROLS & HOW TO PLAY</h2>
+          </div>
+          <button className="modal-close-btn" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="keys-grid">
+            {HELP_CONTROLS.map((row) => (
+              <div key={row.desc} className="key-row">
+                <div className="key-badges">
+                  {row.keys.map((k) => (
+                    <span key={k} className={row.wide ? 'key-cap wide-key' : 'key-cap'}>
+                      {k}
+                    </span>
+                  ))}
+                </div>
+                <span className="key-desc">{row.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-footer" style={MODAL_FOOTER_STYLE}>
+          <button className="primary-btn" onClick={onClose}>
+            GOT IT, LET'S RACE!
+          </button>
+          <div style={MODAL_CREDIT_STYLE}>
+            Created with passion by{' '}
+            <a
+              href="https://zeesu-royalist.vercel.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={MODAL_AUTHOR_STYLE}
+            >
+              Zeesu Royalist
+            </a>{' '}
+            •{' '}
+            <a
+              href="https://zeesu-royalist.vercel.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={MODAL_SITE_STYLE}
+            >
+              zeesu-royalist.vercel.app
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+export function ControlsOverlay() {
   const [isGarageOpen, setIsGarageOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const [inParis, setInParis] = useState(true);
 
-  const getTimeIcon = () => {
-    if (timeOfDay === 'day') return <Sun size={18} color="#ffbb00" />;
-    if (timeOfDay === 'sunset') return <Sunset size={18} color="#ff7733" />;
-    return <Moon size={18} color="#88aaff" />;
-  };
+  const openGarage = useCallback(() => setIsGarageOpen(true), []);
+  const closeGarage = useCallback(() => setIsGarageOpen(false), []);
+  const openHelp = useCallback(() => setIsHelpOpen(true), []);
+  const closeHelp = useCallback(() => setIsHelpOpen(false), []);
 
   return (
     <>
       <header className="game-header">
-        {/* Brand / Title */}
-        <div className="brand-group">
-          <span
-            className="brand-badge"
-            onClick={() => window.location.reload()}
-            title="Reload Game"
-          >
-            Zr
-          </span>
-          <h1
-            className="brand-title"
-            onClick={() => window.location.reload()}
-            title="Reload Game"
-          >
-            Z-RACE
-          </h1>
-          <a
-            href="https://zeesu-royalist.vercel.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="brand-sub"
-            title="Visit Zeesu Royalist"
-          >
-            Zeesu Royalist
-          </a>
-        </div>
-
-        {/* Center Quick Action Buttons */}
-        <div className="header-actions">
-          {/* Race Mode Toggle */}
-          <button
-            className={`action-pill ${raceActive ? 'race-active-pill' : 'race-idle-pill'}`}
-            onClick={() => {
-              soundManager.init();
-              soundManager.resume();
-              if (raceActive) stopRace();
-              else { setInParis(false); startRace(); }
-            }}
-            title={raceActive ? 'End Race' : 'Start Circuit Race'}
-          >
-            <Flag size={16} />
-            <span>{raceActive ? 'ABORT RACE' : 'START RACE'}</span>
-          </button>
-
-          {/* Garage / Vehicle, Marina & Helipad Selector */}
-          <button
-            className="action-pill car-selector-pill"
-            onClick={() => setIsGarageOpen(true)}
-            title={`Switch Vehicle / Boat / Helicopter (${carName})`}
-          >
-            {vehicleType === 'helicopter' ? <Fan size={16} /> : vehicleType === 'boat' ? <Ship size={16} /> : <Car size={16} />}
-            <span>{(carBrand || 'MCLAREN').toUpperCase()}</span>
-          </button>
-
-          {/* Fast Travel between Districts / Harbor Zones */}
-          <button
-            className="action-pill"
-            onClick={() => {
-              soundManager.init();
-              soundManager.resume();
-              if (raceActive) stopRace();
-              const curZ = useGameStore.getState().carPosition[2];
-              const curX = useGameStore.getState().carPosition[0];
-              if (vehicleType === 'boat') {
-                const goingToBay = curZ < 60;
-                teleportTo(goingToBay ? [762, WATER_SURFACE_Y, 174] : [405, WATER_SURFACE_Y, -96], Math.PI / 2);
-                setInParis(goingToBay);
-              } else {
-                const goingToParis = curX < 330;
-                const yAlt = vehicleType === 'helicopter' ? 6.0 : 0.3;
-                teleportTo(goingToParis ? [395, yAlt, -35] : [-3.0, yAlt, 10.0], goingToParis ? Math.PI * 0.4 : 0);
-                setInParis(goingToParis);
-              }
-            }}
-            title={
-              vehicleType === 'boat'
-                ? 'Jump between Seine Marina & Open Harbor Bay'
-                : (inParis ? 'Return to Main City' : 'Teleport to Paris District (or drive East Highway)')
-            }
-          >
-            <MapPin size={15} />
-            <span>{vehicleType === 'boat' ? (inParis ? 'MARINA' : 'OPEN BAY') : (inParis ? 'CITY' : 'PARIS')}</span>
-          </button>
-
-          {/* Camera View Switcher (Icon Only) */}
-          <button
-            className="icon-action-btn"
-            onClick={cycleCameraMode}
-            title={`Switch Camera: ${cameraMode.toUpperCase()} (Press C)`}
-          >
-            <Camera size={18} />
-          </button>
-
-          {/* Time of Day / Weather Switcher (Icon Only) */}
-          <button
-            className="icon-action-btn"
-            onClick={cycleTimeOfDay}
-            title={`Toggle Weather/Time: ${timeOfDay.toUpperCase()} (Press T)`}
-          >
-            {getTimeIcon()}
-          </button>
-
-          {/* Sound Toggle */}
-          <button
-            className="icon-action-btn"
-            onClick={() => {
-              soundManager.init();
-              soundManager.resume();
-              toggleSound();
-            }}
-            title="Toggle Audio (Press M)"
-          >
-            {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} color="#ff4455" />}
-          </button>
-
-          {/* Reset Car */}
-          <button
-            className="icon-action-btn reset-btn"
-            onClick={triggerReset}
-            title="Reset Car Upright (Press R)"
-          >
-            <RotateCcw size={18} />
-          </button>
-
-          {/* Controls Help */}
-          <button
-            className="icon-action-btn"
-            onClick={() => setIsHelpOpen(true)}
-            title="Controls & Instructions"
-          >
-            <HelpCircle size={18} />
-          </button>
-        </div>
+        <BrandGroup />
+        <HeaderActions onOpenGarage={openGarage} onOpenHelp={openHelp} />
       </header>
 
-      {/* Car Customizer & Model Selector Modal */}
-      <CarCustomizerModal
-        isOpen={isGarageOpen}
-        onClose={() => setIsGarageOpen(false)}
-      />
-
-      {/* Controls Help Modal */}
-      {isHelpOpen && (
-        <div className="modal-backdrop" onClick={() => setIsHelpOpen(false)}>
-          <div className="modal-card help-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title-row">
-                <Keyboard className="text-cyan" size={24} />
-                <h2>GAME CONTROLS & HOW TO PLAY</h2>
-              </div>
-              <button className="modal-close-btn" onClick={() => setIsHelpOpen(false)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="keys-grid">
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">W</span>
-                    <span className="key-cap">▲</span>
-                  </div>
-                  <span className="key-desc">Accelerate / Gas Pedal</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">S</span>
-                    <span className="key-cap">▼</span>
-                  </div>
-                  <span className="key-desc">Brake / Reverse Gear</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">A</span>
-                    <span className="key-cap">D</span>
-                    <span className="key-cap">◀</span>
-                    <span className="key-cap">▶</span>
-                  </div>
-                  <span className="key-desc">Steer Left & Right</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">SPACE</span>
-                  </div>
-                  <span className="key-desc">Drift / Heli Climb Up</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">Q</span>
-                    <span className="key-cap">Z</span>
-                  </div>
-                  <span className="key-desc">Helicopter Descend / Land</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">SHIFT</span>
-                  </div>
-                  <span className="key-desc">Nitro Boost Surge</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">E</span>
-                  </div>
-                  <span className="key-desc">Board Boat / Heli or Return to Car</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">R</span>
-                  </div>
-                  <span className="key-desc">Reset Car onto Road</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">C</span>
-                  </div>
-                  <span className="key-desc">Cycle 3 Camera Angles (Close, Far, Aerial)</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">T</span>
-                  </div>
-                  <span className="key-desc">Cycle Time (Day, Sunset, Cyberpunk Night)</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap">M</span>
-                  </div>
-                  <span className="key-desc">Mute / Unmute Procedural Sound</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">MOUSE DRAG</span>
-                  </div>
-                  <span className="key-desc">360° Orbit Camera (Inspect Car from Any Angle)</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">WHEEL / PINCH</span>
-                  </div>
-                  <span className="key-desc">Zoom In & Out Smoothly</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">DRIVE (W / ▲)</span>
-                  </div>
-                  <span className="key-desc">Auto-Recenter Camera Smoothly Behind Car</span>
-                </div>
-                <div className="key-row">
-                  <div className="key-badges">
-                    <span className="key-cap wide-key">2x CLICK</span>
-                  </div>
-                  <span className="key-desc">Instant Camera Snap to Rear</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-footer" style={{ flexDirection: 'column', gap: '10px' }}>
-              <button className="primary-btn" onClick={() => setIsHelpOpen(false)}>
-                GOT IT, LET'S RACE!
-              </button>
-              <div style={{ fontSize: '11px', color: '#8fa0b5', textAlign: 'center', marginTop: '2px' }}>
-                Created with passion by{' '}
-                <a
-                  href="https://zeesu-royalist.vercel.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--primary-cyan)', fontWeight: 700, textDecoration: 'none' }}
-                >
-                  Zeesu Royalist
-                </a>{' '}
-                •{' '}
-                <a
-                  href="https://zeesu-royalist.vercel.app"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: '#00ff88', textDecoration: 'none' }}
-                >
-                  zeesu-royalist.vercel.app
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <CarCustomizerModal isOpen={isGarageOpen} onClose={closeGarage} />
+      {isHelpOpen && <HelpModal onClose={closeHelp} />}
     </>
   );
 }
-

@@ -1,38 +1,148 @@
-import React, { useRef, useEffect } from 'react';
-import { useGameStore } from '../store/gameStore';
+import { memo, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Zap, Flame, Timer, Trophy, Waves, Ship, Car, Fan } from 'lucide-react';
+import { useGameStore } from '../store/gameStore';
+
+const ICON_CAR = <Car size={16} />;
+const ICON_FAN = <Fan size={16} />;
+const ICON_SHIP = <Ship size={16} />;
+const ICON_WAVES = <Waves size={16} />;
+const ICON_ZAP = <Zap size={9} className="cyber-zap" />;
+const ICON_TIMER = <Timer size={9} className="icon-pulse" />;
+const ICON_TROPHY = <Trophy size={10} color="#ffd700" />;
+const ICON_FLAME = <Flame size={12} className="flame-icon" />;
+
+const RPM_INIT_STYLE = { width: '0%' };
+const NITRO_INIT_STYLE = { width: '100%' };
+const DRIFT_HIDE_STYLE = { display: 'none' };
 
 const formatTime = (secs) => {
-  const m = Math.floor(secs / 60);
-  const s = (secs % 60).toFixed(2);
-  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  const totalCs = Math.max(0, Math.round(secs * 100));
+  const m = (totalCs / 6000) | 0;
+  const s = ((totalCs % 6000) / 100) | 0;
+  const cs = totalCs % 100;
+  return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}.${cs < 10 ? '0' : ''}${cs}`;
 };
 
-export function SpeedometerHUD() {
-  const raceActive = useGameStore((s) => s.raceActive);
-  const raceCountdown = useGameStore((s) => s.raceCountdown);
-  const bestLapTime = useGameStore((s) => s.bestLapTime);
-  const currentCheckpoint = useGameStore((s) => s.currentCheckpoint);
-  const totalCheckpoints = useGameStore((s) => s.totalCheckpoints);
-  const raceFinished = useGameStore((s) => s.raceFinished);
-  const isInWater = useGameStore((s) => s.isInWater);
-  const nearbyPrompt = useGameStore((s) => s.nearbyPrompt);
-  const vehicleType = useGameStore((s) => s.vehicleType);
-  const triggerReset = useGameStore((s) => s.triggerReset);
+const handleProximitySwitch = () => {
+  const st = useGameStore.getState();
+  const prompt = st.nearbyPrompt;
+  if (prompt?.kind === 'board_boat' || prompt?.kind === 'board_heli') {
+    st.boardWorldVehicle(
+      prompt.vehicleType || (prompt.kind === 'board_heli' ? 'helicopter' : 'boat'),
+      prompt.targetId,
+      prompt.carParkSpot || st.carPosition,
+      prompt.carRotY ?? st.carRotation
+    );
+  } else if (prompt?.kind === 'return_car') {
+    st.returnToParkedCar(st.carPosition, st.carRotation);
+  }
+};
 
-  const handleProximitySwitch = () => {
-    const st = useGameStore.getState();
-    if (nearbyPrompt?.kind === 'board_boat' || nearbyPrompt?.kind === 'board_heli') {
-      st.boardWorldVehicle(
-        nearbyPrompt.vehicleType || (nearbyPrompt.kind === 'board_heli' ? 'helicopter' : 'boat'),
-        nearbyPrompt.targetId,
-        nearbyPrompt.carParkSpot || st.carPosition,
-        nearbyPrompt.carRotY ?? st.carRotation
-      );
-    } else if (nearbyPrompt?.kind === 'return_car') {
-      st.returnToParkedCar(st.carPosition, st.carRotation);
-    }
-  };
+const handleWaterRespawn = () => useGameStore.getState().triggerReset();
+const handleFinishBannerEnd = () => useGameStore.setState({ raceFinished: false });
+
+const CountdownOverlay = memo(function CountdownOverlay() {
+  const raceCountdown = useGameStore((s) => s.raceCountdown);
+  if (raceCountdown === null) return null;
+  return (
+    <div className="race-countdown-overlay">
+      <div key={raceCountdown} className={`countdown-num ${raceCountdown === 0 ? 'countdown-go' : ''}`}>
+        {raceCountdown === 0 ? 'GO!' : raceCountdown}
+      </div>
+    </div>
+  );
+});
+
+const FinishBanner = memo(function FinishBanner() {
+  const raceFinished = useGameStore((s) => s.raceFinished);
+  if (!raceFinished) return null;
+  const { racePosition, lapTime } = useGameStore.getState();
+  return (
+    <div className="race-finish-banner" onAnimationEnd={handleFinishBannerEnd}>
+      <div className="banner-badge">P{racePosition} OF 7</div>
+      <div className={`banner-title ${racePosition === 1 ? 'gold' : ''}`}>
+        {racePosition === 1 ? '1ST PLACE VICTORY' : 'RACE COMPLETED'}
+      </div>
+      <div className="banner-time">{formatTime(lapTime)}</div>
+    </div>
+  );
+});
+
+const ProximityPrompt = memo(function ProximityPrompt() {
+  const nearbyPrompt = useGameStore((s) => s.nearbyPrompt);
+  if (!nearbyPrompt) return null;
+  const isReturn = nearbyPrompt.kind === 'return_car';
+  return (
+    <div className={`proximity-switch-pill ${isReturn ? 'is-car-return' : ''}`}>
+      {isReturn ? ICON_CAR : nearbyPrompt.kind === 'board_heli' ? ICON_FAN : ICON_SHIP}
+      <span className="proximity-prompt-text">Enter in this vehicle</span>
+      <button type="button" className="proximity-enter-btn" onClick={handleProximitySwitch}>
+        ENTER (E)
+      </button>
+    </div>
+  );
+});
+
+const WaterAlert = memo(function WaterAlert() {
+  const showWaterAlert = useGameStore((s) => s.isInWater && !s.nearbyPrompt);
+  if (!showWaterAlert) return null;
+  return (
+    <button type="button" className="water-alert-pill" onClick={handleWaterRespawn}>
+      {ICON_WAVES}
+      <span>IN WATER — TAP OR PRESS [R] TO RESPAWN ON ROAD</span>
+    </button>
+  );
+});
+
+const RaceTelemetry = memo(function RaceTelemetry({ posRef, lapTimeRef }) {
+  const { currentCheckpoint, totalCheckpoints, bestLapTime } = useGameStore(
+    useShallow((s) => ({
+      currentCheckpoint: s.currentCheckpoint,
+      totalCheckpoints: s.totalCheckpoints,
+      bestLapTime: s.bestLapTime
+    }))
+  );
+
+  const st = useGameStore.getState();
+
+  return (
+    <div className="cyber-race-telemetry">
+      <div className="race-sub-row">
+        <div className="race-sub-col">
+          <span className="race-sub-label">POS</span>
+          <span className="race-pos-val">P<span ref={posRef}>{st.racePosition}</span><small className="race-total-rank">/7</small></span>
+        </div>
+        <div className="race-sub-divider" />
+        <div className="race-sub-col">
+          <span className="race-sub-label">{ICON_TIMER} TIME</span>
+          <span ref={lapTimeRef} className="race-time-val">{formatTime(st.lapTime)}</span>
+        </div>
+      </div>
+      <div className="race-sub-row race-sub-row-secondary">
+        <div className="race-sub-col">
+          <span className="race-sub-label">GATE</span>
+          <span className="race-gate-val">{currentCheckpoint} / {totalCheckpoints}</span>
+        </div>
+        {bestLapTime !== null && (
+          <>
+            <div className="race-sub-divider" />
+            <div className="race-sub-col">
+              <span className="race-sub-label">{ICON_TROPHY} BEST</span>
+              <span className="race-best-val">{formatTime(bestLapTime)}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
+
+/** Zero-GC telemetry HUD with isolated alert overlays and visibility-aware RAF updates. */
+export function SpeedometerHUD() {
+  const { raceActive, vehicleType } = useGameStore(
+    useShallow((s) => ({ raceActive: s.raceActive, vehicleType: s.vehicleType }))
+  );
 
   const speedRef = useRef(null);
   const gearRef = useRef(null);
@@ -45,118 +155,136 @@ export function SpeedometerHUD() {
   const driftScoreRef = useRef(null);
 
   useEffect(() => {
-    let animId;
-    let prev = {};
+    let animId = 0;
+    let running = !document.hidden;
+
+    let prevSpeed = -1;
+    let prevRpm = -1;
+    let prevFillPct = -1;
+    let prevRpmTier = -1;
+    let prevGear = null;
+    let prevNitro = -1;
+    let prevNitroActive = null;
+    let prevDrifting = false;
+    let prevDriftScore = -1;
+    let prevLapCs = -1;
+    let prevPos = -1;
 
     const update = () => {
+      if (!running) return;
       const s = useGameStore.getState();
       const speed = Math.round(s.speed);
       const rpm = Math.round(s.rpm);
       const nitro = Math.round(s.nitro);
 
-      if (speed !== prev.speed && speedRef.current) speedRef.current.textContent = speed;
-      if (s.gear !== prev.gear && gearRef.current) {
-        gearRef.current.textContent = s.gear;
-        gearRef.current.classList.toggle('gear-rev', s.gear === 'R');
+      const speedChanged = speed !== prevSpeed;
+      if (speedChanged) {
+        prevSpeed = speed;
+        if (speedRef.current) speedRef.current.textContent = speed;
       }
 
-      // Smooth RPM / Speed filling bar that turns RED as speed/RPM rises and empties on slowdown
-      if (rpm !== prev.rpm || speed !== prev.speed) {
-        const fillPct = Math.max(0, Math.min(100, Math.max(((rpm - 900) / 7100) * 100, (speed / 210) * 100)));
-        if (rpmFillRef.current) rpmFillRef.current.style.width = `${fillPct}%`;
-        if (rpmValRef.current) {
-          rpmValRef.current.textContent = rpm;
-          rpmValRef.current.style.color = fillPct > 68 ? '#ff1e42' : fillPct > 38 ? '#ffaa00' : '#ffffff';
-          rpmValRef.current.style.textShadow = fillPct > 68 ? '0 0 8px #ff1e42' : 'none';
+      if (s.gear !== prevGear) {
+        prevGear = s.gear;
+        if (gearRef.current) {
+          gearRef.current.textContent = s.gear;
+          gearRef.current.classList.toggle('gear-rev', s.gear === 'R');
         }
       }
 
-      if (nitro !== prev.nitro && nitroRef.current) {
-        nitroRef.current.style.width = `${nitro}%`;
-      }
-      if (s.isNitroActive !== prev.nitroActive && nitroRef.current) {
-        nitroRef.current.classList.toggle('nitro-burning', !!s.isNitroActive);
+      if (rpm !== prevRpm || speedChanged) {
+        if (rpm !== prevRpm && rpmValRef.current) {
+          rpmValRef.current.textContent = rpm;
+        }
+        prevRpm = rpm;
+
+        const fillPct = Math.max(0, Math.min(100, Math.round(Math.max(((rpm - 900) / 7100) * 100, (speed / 210) * 100))));
+        if (fillPct !== prevFillPct) {
+          prevFillPct = fillPct;
+          if (rpmFillRef.current) rpmFillRef.current.style.width = `${fillPct}%`;
+
+          const tier = fillPct > 68 ? 2 : fillPct > 38 ? 1 : 0;
+          if (tier !== prevRpmTier && rpmValRef.current) {
+            prevRpmTier = tier;
+            rpmValRef.current.style.color = tier === 2 ? '#ff1e42' : tier === 1 ? '#ffaa00' : '#ffffff';
+            rpmValRef.current.style.textShadow = tier === 2 ? '0 0 8px #ff1e42' : 'none';
+          }
+        }
       }
 
-      if (lapTimeRef.current && s.raceActive) {
-        const t = formatTime(s.lapTime);
-        if (t !== prev.time) { lapTimeRef.current.textContent = t; prev.time = t; }
+      if (nitro !== prevNitro) {
+        prevNitro = nitro;
+        if (nitroRef.current) nitroRef.current.style.width = `${nitro}%`;
       }
 
-      if (posRef.current && s.raceActive && s.racePosition !== prev.pos) {
-        posRef.current.textContent = s.racePosition;
-        prev.pos = s.racePosition;
+      const nitroActive = !!s.isNitroActive;
+      if (nitroActive !== prevNitroActive) {
+        prevNitroActive = nitroActive;
+        if (nitroRef.current) nitroRef.current.classList.toggle('nitro-burning', nitroActive);
+      }
+
+      if (s.raceActive) {
+        if (lapTimeRef.current) {
+          const lapCs = Math.max(0, Math.round(s.lapTime * 100));
+          if (lapCs !== prevLapCs) {
+            prevLapCs = lapCs;
+            lapTimeRef.current.textContent = formatTime(s.lapTime);
+          }
+        }
+        if (posRef.current && s.racePosition !== prevPos) {
+          prevPos = s.racePosition;
+          posRef.current.textContent = s.racePosition;
+        }
+      } else if (prevLapCs !== -1) {
+        prevLapCs = -1;
+        prevPos = -1;
       }
 
       if (driftRef.current) {
         if (s.isDrifting) {
-          if (!prev.drifting) driftRef.current.style.display = 'flex';
-          if (driftScoreRef.current && s.driftScore !== prev.driftScore) {
+          if (!prevDrifting) {
+            prevDrifting = true;
+            driftRef.current.style.display = 'flex';
+          }
+          if (driftScoreRef.current && s.driftScore !== prevDriftScore) {
+            prevDriftScore = s.driftScore;
             driftScoreRef.current.textContent = `+${s.driftScore}`;
           }
-        } else if (prev.drifting) {
+        } else if (prevDrifting) {
+          prevDrifting = false;
+          prevDriftScore = -1;
           driftRef.current.style.display = 'none';
         }
       }
 
-      prev = { speed, rpm, gear: s.gear, nitro, nitroActive: s.isNitroActive, drifting: s.isDrifting, driftScore: s.driftScore, time: prev.time, pos: prev.pos };
       animId = requestAnimationFrame(update);
     };
 
-    animId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(animId);
+    const onVisibility = () => {
+      if (document.hidden) {
+        running = false;
+        if (animId) { cancelAnimationFrame(animId); animId = 0; }
+      } else if (!running) {
+        running = true;
+        animId = requestAnimationFrame(update);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    if (running) animId = requestAnimationFrame(update);
+
+    return () => {
+      running = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (animId) cancelAnimationFrame(animId);
+    };
   }, []);
 
   return (
     <div className="hud-container">
-      {/* 3... 2... 1... Countdown */}
-      {raceCountdown !== null && (
-        <div className="race-countdown-overlay">
-          <div key={raceCountdown} className={`countdown-num ${raceCountdown === 0 ? 'countdown-go' : ''}`}>
-            {raceCountdown === 0 ? 'GO!' : raceCountdown}
-          </div>
-        </div>
-      )}
-
-      {/* Race Finished (Auto-dismiss via onAnimationEnd) */}
-      {raceFinished && (
-        <div className="race-finish-banner" onAnimationEnd={() => useGameStore.setState({ raceFinished: false })}>
-          <div className="banner-badge">P{useGameStore.getState().racePosition} OF 7</div>
-          <div className={`banner-title ${useGameStore.getState().racePosition === 1 ? 'gold' : ''}`}>
-            {useGameStore.getState().racePosition === 1 ? '1ST PLACE VICTORY' : 'RACE COMPLETED'}
-          </div>
-          <div className="banner-time">{formatTime(useGameStore.getState().lapTime)}</div>
-        </div>
-      )}
-
-      {/* Interactive Enter-Vehicle Prompt with dedicated side ENTER button */}
-      {nearbyPrompt && (
-        <div className={`proximity-switch-pill ${nearbyPrompt.kind === 'return_car' ? 'is-car-return' : ''}`}>
-          {nearbyPrompt.kind === 'return_car' ? (
-            <Car size={16} />
-          ) : nearbyPrompt.kind === 'board_heli' ? (
-            <Fan size={16} />
-          ) : (
-            <Ship size={16} />
-          )}
-          <span className="proximity-prompt-text">Enter in this vehicle</span>
-          <button
-            type="button"
-            className="proximity-enter-btn"
-            onClick={handleProximitySwitch}
-          >
-            ENTER (E)
-          </button>
-        </div>
-      )}
-
-      {/* Water Submersion Alert + Quick Recovery */}
-      {isInWater && !nearbyPrompt && (
-        <button type="button" className="water-alert-pill" onClick={triggerReset}>
-          <Waves size={16} />
-          <span>IN WATER — TAP OR PRESS [R] TO RESPAWN ON ROAD</span>
-        </button>
-      )}
+      <CountdownOverlay />
+      <FinishBanner />
+      <ProximityPrompt />
+      <WaterAlert />
 
       {/* SPEEDOMETER CLUSTER (Top-Right, Minimal Cyber Blade) */}
       <div className="speedometer-cluster">
@@ -174,57 +302,27 @@ export function SpeedometerHUD() {
           </div>
         </div>
 
-        {/* Dynamic Tachometer Bar (Smooth progressive fill that turns red) */}
+        {/* Dynamic Tachometer Bar */}
         <div className="cyber-tach-bar-row">
           <div className="cyber-rpm-track">
-            <div ref={rpmFillRef} className="cyber-rpm-fill" style={{ width: '0%' }} />
+            <div ref={rpmFillRef} className="cyber-rpm-fill" style={RPM_INIT_STYLE} />
           </div>
           <span ref={rpmValRef} className="cyber-rpm-num">900</span>
         </div>
 
         {/* Nitro Boost Rail */}
         <div className="cyber-nitro-row">
-          <Zap size={9} className="cyber-zap" />
+          {ICON_ZAP}
           <div className="cyber-nitro-track">
-            <div ref={nitroRef} className="cyber-nitro-fill" style={{ width: '100%' }} />
+            <div ref={nitroRef} className="cyber-nitro-fill" style={NITRO_INIT_STYLE} />
           </div>
         </div>
 
-        {/* Race Telemetry (Under Speedometer during Race) */}
-        {raceActive && (
-          <div className="cyber-race-telemetry">
-            <div className="race-sub-row">
-              <div className="race-sub-col">
-                <span className="race-sub-label">POS</span>
-                <span className="race-pos-val">P<span ref={posRef}>{useGameStore.getState().racePosition}</span><small className="race-total-rank">/7</small></span>
-              </div>
-              <div className="race-sub-divider" />
-              <div className="race-sub-col">
-                <span className="race-sub-label"><Timer size={9} className="icon-pulse" /> TIME</span>
-                <span ref={lapTimeRef} className="race-time-val">{formatTime(useGameStore.getState().lapTime)}</span>
-              </div>
-            </div>
-            <div className="race-sub-row race-sub-row-secondary">
-              <div className="race-sub-col">
-                <span className="race-sub-label">GATE</span>
-                <span className="race-gate-val">{currentCheckpoint} / {totalCheckpoints}</span>
-              </div>
-              {bestLapTime !== null && (
-                <>
-                  <div className="race-sub-divider" />
-                  <div className="race-sub-col">
-                    <span className="race-sub-label"><Trophy size={10} color="#ffd700" /> BEST</span>
-                    <span className="race-best-val">{formatTime(bestLapTime)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
+        {raceActive && <RaceTelemetry posRef={posRef} lapTimeRef={lapTimeRef} />}
 
-        {/* Drift Score (Under Speedometer, or under Telemetry during race) */}
-        <div ref={driftRef} className="drift-score-popup" style={{ display: 'none' }}>
-          <div className="drift-title"><Flame size={12} className="flame-icon" /> DRIFT</div>
+        {/* Drift Score */}
+        <div ref={driftRef} className="drift-score-popup" style={DRIFT_HIDE_STYLE}>
+          <div className="drift-title">{ICON_FLAME} DRIFT</div>
           <div ref={driftScoreRef} className="drift-score">+0</div>
         </div>
       </div>
