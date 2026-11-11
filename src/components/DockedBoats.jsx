@@ -143,9 +143,9 @@ function DockedHeliVessel({ heli }) {
       </group>
       <PulseMarker
         position={heli.position}
-        radius={5.5}
-        beaconHeight={4.2}
-        color="#fbbf24"
+        radius={heli.flightMode === 'plane' ? 7.2 : 5.5}
+        beaconHeight={heli.flightMode === 'plane' ? 4.8 : 4.2}
+        color={heli.flightMode === 'plane' ? '#f97316' : '#fbbf24'}
         opacity={0.38}
       />
     </group>
@@ -185,8 +185,8 @@ export function DockedBoats() {
 
   return (
     <group>
-      {/* Persistent Painted Helipad Landing Circles in Paris */}
-      {dockedHelicopters.map((h) => (
+      {/* Persistent Painted Helipad Circles in Paris (Planes park cleanly directly on Paris tarmac) */}
+      {dockedHelicopters.filter((h) => h.flightMode !== 'plane').map((h) => (
         <mesh
           key={`pad-${h.id}`}
           position={[h.homePosition[0], h.homePosition[1] + 0.03, h.homePosition[2]]}

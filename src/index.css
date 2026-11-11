@@ -1654,7 +1654,7 @@ html, body, #root {
   }
 }
 
-/* ===== WATER SUBMERSION & PROXIMITY VEHICLE SWITCH PILL ===== */
+/* ===== WATER SUBMERSION & PROXIMITY VEHICLE SWITCH BAR ===== */
 .water-alert-pill,
 .proximity-switch-pill {
   position: absolute;
@@ -1664,36 +1664,81 @@ html, body, #root {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 18px;
-  border-radius: 999px;
-  background: rgba(6, 38, 56, 0.90);
-  border: 1px solid rgba(0, 240, 255, 0.55);
-  color: #b8f5ff;
-  font-family: 'Orbitron', sans-serif;
-  font-size: 11px;
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 1px;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 0 22px rgba(0, 200, 255, 0.35);
+  letter-spacing: 0.8px;
+  backdrop-filter: blur(5px) saturate(140%);
+  -webkit-backdrop-filter: blur(5px) saturate(140%);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   z-index: 50;
 }
 
+.water-alert-pill {
+  background: rgba(6, 38, 56, 0.72);
+  border-color: rgba(0, 240, 255, 0.5);
+  color: #b8f5ff;
+  border-radius: 999px;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+
 .proximity-switch-pill.is-car-return {
-  background: rgba(6, 46, 34, 0.90);
-  border-color: rgba(16, 185, 129, 0.65);
-  color: #a7f3d0;
-  box-shadow: 0 0 22px rgba(16, 185, 129, 0.35);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.proximity-enter-btn {
+  padding: 6px 15px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.28), rgba(255, 255, 255, 0.14));
+  border: 1px solid rgba(0, 240, 255, 0.65);
+  color: #ffffff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.proximity-enter-btn:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.proximity-enter-btn:active {
+  transform: translateY(1px);
+}
+
+.proximity-switch-pill.is-car-return .proximity-enter-btn {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.32), rgba(255, 255, 255, 0.14));
+  border-color: rgba(16, 185, 129, 0.72);
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 @media (max-height: 520px), (max-width: 900px) {
   .water-alert-pill,
   .proximity-switch-pill {
     top: 44px;
-    padding: 5px 12px;
-    font-size: 8.5px;
-    gap: 5px;
+    padding: 4px 5px 4px 10px;
+    font-size: 10px;
+    gap: 6px;
     white-space: nowrap;
+  }
+
+  .proximity-enter-btn {
+    padding: 4px 10px;
+    font-size: 9px;
   }
 }

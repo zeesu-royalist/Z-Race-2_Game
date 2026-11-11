@@ -32,6 +32,16 @@ export function TouchControls() {
     onContextMenu: (e) => e.preventDefault()
   });
 
+  const auxButtons = isHeli
+    ? [
+        { key: 'descend', cls: 'boost-btn', label: 'Descend Down', text: 'DOWN', Icon: ArrowDown },
+        { key: 'handbrake', cls: 'handbrake-btn', label: 'Climb Up', text: 'CLIMB', Icon: ArrowUp }
+      ]
+    : [
+        { key: 'handbrake', cls: 'handbrake-btn', label: 'Handbrake', text: 'DRIFT', Icon: Disc },
+        { key: 'nitro', cls: 'boost-btn', label: 'Nitro Boost', text: 'NITRO', Icon: Zap }
+      ];
+
   return (
     <div className="touch-controls-container">
       {/* Left side: Steering Controls */}
@@ -44,22 +54,15 @@ export function TouchControls() {
         </button>
       </div>
 
-      {/* Right side: Pedals, Climb/Land or Handbrake/Boost */}
+      {/* Right side: Pedals, Descend/Climb or Handbrake/Boost */}
       <div className="touch-pedals-group">
         <div className="touch-aux-row">
-          <button type="button" className="touch-btn aux-btn handbrake-btn" {...touchProps('handbrake')} aria-label={isHeli ? 'Climb Up' : 'Handbrake'}>
-            {isHeli ? <ArrowUp size={16} /> : <Disc size={16} />}
-            <span>{isHeli ? 'CLIMB' : 'DRIFT'}</span>
-          </button>
-          <button
-            type="button"
-            className="touch-btn aux-btn boost-btn"
-            {...touchProps(isHeli ? 'descend' : 'nitro')}
-            aria-label={isHeli ? 'Descend Down' : 'Nitro Boost'}
-          >
-            {isHeli ? <ArrowDown size={16} /> : <Zap size={16} />}
-            <span>{isHeli ? 'DOWN' : 'NITRO'}</span>
-          </button>
+          {auxButtons.map(({ key, cls, label, text, Icon }) => (
+            <button key={text} type="button" className={`touch-btn aux-btn ${cls}`} {...touchProps(key)} aria-label={label}>
+              <Icon size={16} />
+              <span>{text}</span>
+            </button>
+          ))}
         </div>
 
         <div className="touch-drive-row">

@@ -229,6 +229,7 @@ export function Car() {
 
     const isBoat = st.vehicleType === 'boat';
     const isHeli = st.vehicleType === 'helicopter';
+    const isPlane = Boolean(tuningRef.current?.flightMode === 'plane');
 
     // 1. NITRO BOOST LOGIC (Auto-accelerates even without pressing GAS)
     if (s.nitro <= 0) s.nitroLocked = true;
@@ -268,12 +269,12 @@ export function Car() {
     const raceCountdown = st.raceCountdown;
     const isLockedByCountdown = raceCountdown !== null && raceCountdown > 0;
 
-    const normalMaxSpeed = tuning.maxSpeed || (isBoat ? 28 : isHeli ? 62 : 64);
+    const normalMaxSpeed = tuning.maxSpeed || (isBoat ? 28 : isPlane ? 96 : isHeli ? 62 : 64);
     const maxForwardSpeed = normalMaxSpeed * nitroMultiplier;
-    const maxReverseSpeed = isBoat ? -12 : isHeli ? -22 : -15;
-    const accelRate = (tuning.accelRate || (isBoat ? 12 : isHeli ? 22 : 19)) * nitroMultiplier;
-    const brakeRate = isBoat ? 14 : isHeli ? 20 : 34;
-    const naturalFriction = isBoat ? 2.1 : isHeli ? 5.0 : 3.6;
+    const maxReverseSpeed = isBoat ? -12 : isPlane ? -5 : isHeli ? -22 : -15;
+    const accelRate = (tuning.accelRate || (isBoat ? 12 : isPlane ? 24 : isHeli ? 22 : 19)) * nitroMultiplier;
+    const brakeRate = isBoat ? 14 : isPlane ? 28 : isHeli ? 20 : 34;
+    const naturalFriction = isBoat ? 2.1 : isPlane ? (s.isGrounded ? 2.8 : 1.4) : isHeli ? 5.0 : 3.6;
 
     // When nitro is NOT active, bleed excess boost speed back to normal top speed
     if (!s.isNitroActive && s.speed > normalMaxSpeed) {
@@ -295,12 +296,17 @@ export function Car() {
         s.speed = Math.min(maxForwardSpeed, s.speed + accelRate * dt);
       }
     } else if (inputState.backward) {
-      if (s.speed > 0.5) {
-        s.speed = Math.max(0, s.speed - brakeRate * dt);
+      const floorSpd = isPlane && !s.isGrounded ? 12.0 : maxReverseSpeed;
+      if (s.speed > (isPlane && !s.isGrounded ? 12.5 : 0.5)) {
+        s.speed = Math.max(isPlane && !s.isGrounded ? 12.0 : 0, s.speed - brakeRate * dt);
         s.isBraking = true;
-      } else {
-        s.speed = Math.max(maxReverseSpeed, s.speed - accelRate * 0.65 * dt);
+      } else if (!(isPlane && !s.isGrounded)) {
+        s.speed = Math.max(floorSpd, s.speed - accelRate * 0.65 * dt);
       }
+    } else if (isPlane && !s.isGrounded) {
+      // Airborne fixed-wing glide maintains clean minimum cruise speed unless braking
+      if (s.speed > 24.0) s.speed = Math.max(24.0, s.speed - naturalFriction * dt);
+      else s.speed = Math.min(24.0, s.speed + 8.0 * dt);
     } else {
       if (s.speed > 0) s.speed = Math.max(0, s.speed - naturalFriction * dt);
       else if (s.speed < 0) s.speed = Math.min(0, s.speed + naturalFriction * dt);
@@ -316,7 +322,11 @@ export function Car() {
     // 4. YAW ROTATION & DRIFT
     const directionSign = s.speed < -0.5 ? -1 : 1;
     let turnRate = 0;
-    if (isHeli) {
+    if (isPlane) {
+      const yawInput = (inputState.left ? 1 : 0) - (inputState.right ? 1 : 0);
+      const authority = s.isGrounded ? Math.min(1, Math.abs(s.speed) / 14.0) * directionSign : 1.0;
+      turnRate = yawInput * (s.isGrounded ? 0.95 : 1.15) * authority * (tuning.turnMultiplier || 1.15);
+    } else if (isHeli) {
       const yawInput = (inputState.left ? 1 : 0) - (inputState.right ? 1 : 0);
       turnRate = yawInput * 1.45 * (tuning.turnMultiplier || 1.15);
     } else if (Math.abs(s.speed) > 0.2) {
@@ -441,9 +451,20 @@ export function Car() {
         }
       }
 
-      const climbSpd = tuning.climbRate || 16;
+      const climbSpd = tuning.climbRate || (isPlane ? 20 : 16);
       let targetVz = 0;
-      if (inputState.handbrake) {
+      if (isPlane) {
+        const lift = THREE.MathUtils.clamp((s.speed - 16.0) / 16.0, 0, 1.35);
+        if (inputState.handbrake && s.speed > 17.5) {
+          targetVz = climbSpd * lift;
+        } else if (inputState.descend) {
+          targetVz = -climbSpd * 0.72;
+        } else if (s.isGrounded) {
+          targetVz = s.speed > 35.0 ? 5.5 * lift : 0;
+        } else {
+          targetVz = s.speed < 25.0 ? -(25.0 - s.speed) * 0.55 : 0;
+        }
+      } else if (inputState.handbrake) {
         targetVz = climbSpd;
       } else if (inputState.descend) {
         targetVz = -climbSpd * 0.85;
@@ -452,8 +473,8 @@ export function Car() {
         targetVz = 4.2;
       }
 
-      s.verticalVelocity = THREE.MathUtils.lerp(s.verticalVelocity, targetVz, 5.5 * dt);
-      s.position.y = Math.min(155.0, s.position.y + s.verticalVelocity * dt);
+      s.verticalVelocity = THREE.MathUtils.lerp(s.verticalVelocity, targetVz, (isPlane ? 4.2 : 5.5) * dt);
+      s.position.y = Math.min(185.0, s.position.y + s.verticalVelocity * dt);
       if (s.position.y <= floorY) {
         s.position.y = floorY;
         if (s.verticalVelocity < 0) s.verticalVelocity = 0;
@@ -463,8 +484,16 @@ export function Car() {
       }
 
       const fwdFrac = THREE.MathUtils.clamp(s.speed / (normalMaxSpeed || 62), -0.6, 1.0);
-      const targetPitch = s.isGrounded ? 0 : fwdFrac * 0.21;
-      const targetRoll = s.isGrounded ? 0 : -s.angularVelocity * 0.22 * (0.35 + 0.65 * Math.abs(fwdFrac));
+      const targetPitch = isPlane
+        ? (s.isGrounded
+            ? (inputState.handbrake && s.speed > 16.0 ? -0.14 * Math.min(1, (s.speed - 16.0) / 10.0) : 0)
+            : THREE.MathUtils.clamp(-s.verticalVelocity * 0.022, -0.34, 0.28))
+        : (s.isGrounded ? 0 : fwdFrac * 0.21);
+      const targetRoll = s.isGrounded
+        ? 0
+        : isPlane
+          ? -s.angularVelocity * 0.36
+          : -s.angularVelocity * 0.22 * (0.35 + 0.65 * Math.abs(fwdFrac));
       s.pitch = THREE.MathUtils.lerp(s.pitch, targetPitch, 5.5 * dt);
       s.roll = THREE.MathUtils.lerp(s.roll, targetRoll, 5.5 * dt);
     } else if (isBoat) {
@@ -644,7 +673,10 @@ export function Car() {
     }
 
     let rpm = 900;
-    if (gear === 'R') {
+    if (isHeli || isBoat) {
+      const topKmH = Math.max(40, (tuningRef.current?.maxSpeed || 65) * 3.6);
+      rpm = 1200 + Math.min(1, speedKmH / topKmH) * 6300 + (isDrivingForward ? 500 : 0);
+    } else if (gear === 'R') {
       rpm = 900 + (Math.abs(speedKmH) / 50) * 5500;
     } else {
       const gearMin = gear === 1 ? 0 : GEAR_MINS[gear];
@@ -652,7 +684,7 @@ export function Car() {
       rpm = 900 + normGearSpeed * 6800 + (isDrivingForward ? 300 : 0);
     }
     s.rpm = Math.min(8000, Math.max(900, rpm));
-    if (s.currentGear !== gear && s.currentGear !== 'R' && gear !== 'R' && gear > s.currentGear && speedKmH > 25) {
+    if (!isHeli && !isBoat && s.currentGear !== gear && s.currentGear !== 'R' && gear !== 'R' && gear > s.currentGear && speedKmH > 25) {
       soundManager.playGearShift();
     }
     s.currentGear = gear;
@@ -673,8 +705,8 @@ export function Car() {
     }
 
     // Sound Engine Update
-    soundManager.updateEngine(s.rpm, isDrivingForward, speedKmH);
-    soundManager.updateDrift(s.isDrifting && !s.isInWater, s.driftIntensity);
+    soundManager.updateEngine(s.rpm, isDrivingForward, speedKmH, activeCarCategoryRef.current);
+    soundManager.updateDrift(!isHeli && !isBoat && s.isDrifting, s.driftIntensity);
     soundManager.updateNitro(s.isNitroActive);
 
     // Update Store Telemetry directly (Zero GC heap churn)
@@ -692,54 +724,45 @@ export function Car() {
     st.carRotation = s.rotationY;
     st.isInWater = s.isInWater;
 
-    // Unified Proximity Seamless Vehicle Switching (Car <-> Boats & Helicopters)
-    const nowMs = performance.now();
-    const lock = st.switchLock;
-    if (!isBoat && !isHeli && !st.raceActive) {
-      const candidates = [...st.dockedBoats, ...st.dockedHelicopters];
-      let closest = null;
-      let closestDist = Infinity;
-      for (let i = 0; i < candidates.length; i++) {
-        const v = candidates[i];
-        if (Math.abs(s.position.y - v.position[1]) > 7.0) continue;
+    // Universal Manual Proximity Prompt (never auto-transfers; user confirms via ENTER button or [E])
+    if (!st.raceActive) {
+      let best = null;
+      let bestDist = Infinity;
+      const worldVehicles = [...st.dockedBoats, ...st.dockedHelicopters];
+      for (let i = 0; i < worldVehicles.length; i++) {
+        const v = worldVehicles[i];
+        if (v.vehicleType === st.vehicleType && v.id === st.currentCarId) continue;
+        if (Math.abs(s.position.y - v.position[1]) > 8.5) continue;
         const d = Math.hypot(s.position.x - v.position[0], s.position.z - v.position[2]);
-        if (d < closestDist) {
-          closestDist = d;
-          closest = v;
+        if (d <= 24.0 && d < bestDist) {
+          bestDist = d;
+          best = { type: 'world', item: v };
+        }
+      }
+      if (st.vehicleType !== 'car' && st.parkedCar) {
+        const p = st.parkedCar;
+        const dCar = Math.hypot(s.position.x - p.position[0], s.position.z - p.position[2]);
+        if (dCar <= 24.0 && Math.abs(s.position.y - p.position[1]) <= 8.5 && dCar < bestDist) {
+          best = { type: 'car', item: p };
         }
       }
 
-      if (lock.blockedBoatId) {
-        const blocked = candidates.find((v) => v.id === lock.blockedBoatId);
-        const bd = blocked ? Math.hypot(s.position.x - blocked.position[0], s.position.z - blocked.position[2]) : Infinity;
-        if (bd > (blocked?.boardRadius || 12) + 5.5) {
-          lock.blockedBoatId = null;
-        }
-      }
-
-      if (closest && closestDist <= 24) {
+      if (best?.type === 'world') {
+        const v = best.item;
         const useCurrent = !s.isInWater && s.position.y > WATER_SURFACE_Y + 0.14;
         const parkSpot = useCurrent
           ? [s.position.x, s.position.y, s.position.z]
-          : (lastDryPoseRef.current.valid ? [...lastDryPoseRef.current.pos] : [...closest.pierPark]);
+          : (lastDryPoseRef.current.valid ? [...lastDryPoseRef.current.pos] : [...v.pierPark]);
         const parkRot = useCurrent ? s.rotationY : (lastDryPoseRef.current.valid ? lastDryPoseRef.current.rotY : Math.PI * 0.5);
-        const kind = closest.vehicleType === 'helicopter' ? 'board_heli' : 'board_boat';
-
-        if (
-          closestDist <= closest.boardRadius &&
-          nowMs >= lock.cooldownUntil &&
-          lock.blockedBoatId !== closest.id
-        ) {
-          st.boardWorldVehicle(closest.vehicleType, closest.id, parkSpot, parkRot);
-        } else if (
-          st.nearbyPrompt?.kind !== kind ||
-          st.nearbyPrompt?.targetId !== closest.id
-        ) {
+        const kind = v.vehicleType === 'helicopter' ? 'board_heli' : 'board_boat';
+        const vehicleNoun = v.flightMode === 'plane' ? 'Plane' : v.vehicleType === 'helicopter' ? 'Helicopter' : 'Boat';
+        if (st.nearbyPrompt?.kind !== kind || st.nearbyPrompt?.targetId !== v.id) {
           st.setNearbyPrompt({
             kind,
-            vehicleType: closest.vehicleType,
-            targetId: closest.id,
-            label: closest.name,
+            vehicleType: v.vehicleType,
+            vehicleNoun,
+            targetId: v.id,
+            label: v.name,
             carParkSpot: parkSpot,
             carRotY: parkRot
           });
@@ -747,28 +770,15 @@ export function Car() {
           st.nearbyPrompt.carParkSpot = parkSpot;
           st.nearbyPrompt.carRotY = parkRot;
         }
-      } else if (st.nearbyPrompt) {
-        st.setNearbyPrompt(null);
-      }
-    } else if ((isBoat || isHeli) && st.parkedCar) {
-      const distToCar = Math.hypot(
-        s.position.x - st.parkedCar.position[0],
-        s.position.z - st.parkedCar.position[2]
-      );
-      const dyToCar = Math.abs(s.position.y - st.parkedCar.position[1]);
-      if (!lock.armedCarReturn && distToCar > 18.0) {
-        lock.armedCarReturn = true;
-      }
-
-      const maxDyReturn = isHeli ? 2.2 : 4.5;
-      if (lock.armedCarReturn && nowMs >= lock.cooldownUntil && distToCar <= 13.5 && dyToCar < maxDyReturn) {
-        st.returnToParkedCar([s.position.x, isBoat ? WATER_SURFACE_Y : s.position.y, s.position.z], s.rotationY);
-      } else if (distToCar <= 24.0 && dyToCar < 9.0) {
-        if (st.nearbyPrompt?.kind !== 'return_car' || st.nearbyPrompt?.targetId !== st.parkedCar.carId) {
+      } else if (best?.type === 'car') {
+        const p = best.item;
+        if (st.nearbyPrompt?.kind !== 'return_car' || st.nearbyPrompt?.targetId !== p.carId) {
           st.setNearbyPrompt({
             kind: 'return_car',
-            targetId: st.parkedCar.carId,
-            label: st.parkedCar.name
+            vehicleType: 'car',
+            vehicleNoun: 'Car',
+            targetId: p.carId,
+            label: p.name
           });
         }
       } else if (st.nearbyPrompt) {

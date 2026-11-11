@@ -37,11 +37,11 @@ export function CarCustomizerModal({ isOpen, onClose }) {
   const tabs = [
     { id: 'car', label: `CARS (${cars.length})`, Icon: Car },
     { id: 'boat', label: `BOATS & SHIPS (${boats.length})`, Icon: Ship },
-    { id: 'helicopter', label: `HELICOPTERS (${helicopters.length})`, Icon: Fan }
+    { id: 'helicopter', label: `AIRCRAFT (${helicopters.length})`, Icon: Fan }
   ];
 
   const folderHint = isHeliTab ? 'public/Helicopters/' : isBoatTab ? 'public/boats/' : 'public/cars-models/';
-  const noun = isHeliTab ? 'helicopters' : isBoatTab ? 'vessels' : 'vehicles';
+  const noun = isHeliTab ? 'aircraft' : isBoatTab ? 'vessels' : 'vehicles';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -51,7 +51,7 @@ export function CarCustomizerModal({ isOpen, onClose }) {
           <div className="modal-title-row">
             {isHeliTab ? <Fan className="text-cyan" size={26} /> : isBoatTab ? <Ship className="text-cyan" size={26} /> : <Car className="text-cyan" size={26} />}
             <div>
-              <h2>GARAGE, MARINA &amp; HELIPAD</h2>
+              <h2>GARAGE, MARINA &amp; AIRFIELD</h2>
               <span className="modal-subtitle">
                 {items.length} {noun} detected in <code>{folderHint}</code>
               </span>
@@ -141,7 +141,7 @@ export function CarCustomizerModal({ isOpen, onClose }) {
                       </span>
                     ) : (
                       <button className="select-car-btn">
-                        {isHeliTab ? 'LAUNCH FROM HELIPAD' : isBoatTab ? 'LAUNCH ON SEINE' : 'SELECT & DRIVE'}
+                        {isHeliTab ? (item.flightMode === 'plane' ? 'LAUNCH FROM RUNWAY' : 'LAUNCH FROM HELIPAD') : isBoatTab ? 'LAUNCH ON SEINE' : 'SELECT & DRIVE'}
                       </button>
                     )}
                   </div>

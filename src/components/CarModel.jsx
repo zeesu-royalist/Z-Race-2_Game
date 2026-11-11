@@ -6,6 +6,161 @@ import { useGameStore } from '../store/gameStore';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 const TARGET_CAR_LENGTH = 3.9;
+let shipCustomCache = null;
+
+function conformHullDecal(meshes, centerZ, centerY, width, height, sideSign, invS) {
+  const geo = new THREE.PlaneGeometry(width, height, 24, 4);
+  if (sideSign > 0) geo.rotateY(Math.PI / 2);
+  else geo.rotateY(-Math.PI / 2);
+
+  const pos = geo.attributes.position;
+  const raycaster = new THREE.Raycaster();
+  const origin = new THREE.Vector3();
+  const dir = new THREE.Vector3(-sideSign, 0, 0);
+  let lastX = sideSign * 1.48;
+
+  for (let i = 0; i < pos.count; i++) {
+    const wy = pos.getY(i) + centerY;
+    const wz = pos.getZ(i) + centerZ;
+    origin.set(sideSign * 5.0, wy, wz);
+    raycaster.set(origin, dir);
+    const hits = raycaster.intersectObjects(meshes, false);
+    const hitX = hits.length > 0 ? hits[0].point.x : lastX;
+    lastX = hitX;
+    pos.setXYZ(i, (hitX + sideSign * 0.016) * invS, wy * invS, wz * invS);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+function getShipCustomAssets(origTex, meshes, invS) {
+  if (shipCustomCache) return shipCustomCache;
+
+  let hullMap = origTex || null;
+  let decalMat = null;
+
+  if (typeof document !== 'undefined') {
+    const img = origTex?.image;
+    if (img && (img.naturalWidth || img.width)) {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      const hc = document.createElement('canvas');
+      hc.width = w;
+      hc.height = h;
+      const hctx = hc.getContext('2d');
+      hctx.drawImage(img, 0, 0, w, h);
+      const imgData = hctx.getImageData(0, 0, w, h);
+      const d = imgData.data;
+
+      // Re-grade washed-out neutral pale steel into authentic matte Royal/French Navy Steel Blue-Grey
+      // while preserving red keel, black boot-top, dark MD flight deck, yellow stripes & doors.
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const lum = (r + g + b) / 3;
+        const wMix = Math.max(0, 1 - (max - min) / 28) * Math.max(0, Math.min(1, (lum - 85) / 55));
+        if (wMix > 0) {
+          d[i] = Math.round(r * (1 - wMix * 0.64));
+          d[i + 1] = Math.round(g * (1 - wMix * 0.52));
+          d[i + 2] = Math.round(b * (1 - wMix * 0.36));
+        } else if (max - min >= 28) {
+          // Deepen & enrich existing painted accents (crimson hull bottom, yellow deck markings)
+          const boost = r > g + 25 ? 1.28 : 1.18;
+          d[i] = Math.max(0, Math.min(255, Math.round(lum + (r - lum) * boost)));
+          d[i + 1] = Math.max(0, Math.min(255, Math.round(lum + (g - lum) * boost)));
+          d[i + 2] = Math.max(0, Math.min(255, Math.round(lum + (b - lum) * boost)));
+        }
+      }
+      hctx.putImageData(imgData, 0, 0);
+
+      const graded = new THREE.CanvasTexture(hc);
+      graded.flipY = origTex.flipY;
+      graded.wrapS = origTex.wrapS;
+      graded.wrapT = origTex.wrapT;
+      graded.colorSpace = THREE.SRGBColorSpace;
+      graded.anisotropy = 8;
+      graded.needsUpdate = true;
+      hullMap = graded;
+    }
+
+    // Transparent naval stencil paint ("Zeesu Royalist") — no box or pasted banner background
+    const dc = document.createElement('canvas');
+    dc.width = 1024;
+    dc.height = 128;
+    const dctx = dc.getContext('2d');
+    dctx.clearRect(0, 0, dc.width, dc.height);
+    dctx.font = '800 84px "Arial Narrow", Arial, sans-serif';
+    dctx.textAlign = 'center';
+    dctx.textBaseline = 'middle';
+    dctx.lineJoin = 'round';
+    dctx.strokeStyle = 'rgba(10, 18, 30, 0.52)';
+    dctx.lineWidth = 6;
+    dctx.strokeText('Zeesu Royalist', 512, 64);
+    dctx.fillStyle = 'rgba(241, 245, 249, 0.95)';
+    dctx.fillText('Zeesu Royalist', 512, 64);
+
+    const decalTex = new THREE.CanvasTexture(dc);
+    decalTex.colorSpace = THREE.SRGBColorSpace;
+    decalTex.anisotropy = 8;
+    decalMat = new THREE.MeshStandardMaterial({
+      map: decalTex,
+      transparent: true,
+      alphaTest: 0.05,
+      depthWrite: false,
+      roughness: 0.76,
+      metalness: 0.10,
+      polygonOffset: true,
+      polygonOffsetFactor: -4
+    });
+  } else {
+    decalMat = new THREE.MeshBasicMaterial({ color: '#f1f5f9' });
+  }
+
+  const hullMat = new THREE.MeshStandardMaterial({
+    map: hullMap,
+    color: '#ffffff',
+    roughness: 0.74,
+    metalness: 0.14,
+    side: THREE.DoubleSide
+  });
+
+  shipCustomCache = {
+    hullMat,
+    decalMat,
+    portGeo: conformHullDecal(meshes, 1.85, 0.90, 4.3, 0.54, 1, invS),
+    stbdGeo: conformHullDecal(meshes, 1.85, 0.90, 4.3, 0.54, -1, invS)
+  };
+  return shipCustomCache;
+}
+
+function customizeAquitaineFrigate(wrapper) {
+  let origTex = null;
+  const meshes = [];
+  wrapper.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    meshes.push(child);
+    if (!origTex && child.material?.map?.image) origTex = child.material.map;
+  });
+  if (!meshes.length) return;
+
+  const invS = 1 / Math.max(0.01, wrapper.scale.x);
+  const { hullMat, decalMat, portGeo, stbdGeo } = getShipCustomAssets(origTex, meshes, invS);
+
+  meshes.forEach((m) => {
+    if (m.material?.map) {
+      m.material = hullMat;
+    } else if (m.material) {
+      m.material = m.material.clone();
+      m.material.color.multiplyScalar(0.62);
+      m.material.roughness = 0.72;
+      m.material.metalness = 0.14;
+    }
+  });
+
+  wrapper.add(new THREE.Mesh(portGeo, decalMat), new THREE.Mesh(stbdGeo, decalMat));
+}
 
 export const KNOWN_ORIENTATIONS = {
   'bmw_m4_f82_razor_2014__www.vecarz.com.glb': [0, Math.PI, 0],
@@ -15,7 +170,9 @@ export const KNOWN_ORIENTATIONS = {
   'tow_boat.glb': [0, 0, 0],
   'aquitaine_-_french_ship.glb': [0, -Math.PI / 2, 0],
   'helicopter.glb': [0, -Math.PI / 2, 0],
-  'sh-60b_seahawk_helicopter.glb': [0, 0, 0]
+  'sh-60b_seahawk_helicopter.glb': [0, 0, 0],
+  'axis_fighter_plane.glb': [0, -Math.PI / 2, 0],
+  'stylized_war_plane.glb': [0, 0, 0]
 };
 
 export function spinRotors(rotors, speedRad, dt) {
@@ -98,6 +255,78 @@ function setupHelicopterRotors(root, fileName) {
     tailGroup.add(b1, b2);
     root.add(tailGroup);
     rotors.push({ obj: tailGroup, axis: 'x', speedMul: 2.5 });
+    return rotors;
+  }
+
+  if (fileName === 'axis_fighter_plane.glb') {
+    const propSources = [];
+    root.traverse((child) => {
+      if (child.isMesh && child.geometry && child.name === 'Object_17') propSources.push(child);
+    });
+    const tmpV = new THREE.Vector3();
+    propSources.forEach((child) => {
+      const baseGeo = child.geometry.clone();
+      baseGeo.applyMatrix4(child.matrixWorld);
+      const pos = baseGeo.attributes.position;
+      const idx = baseGeo.index;
+      const triCount = idx ? Math.floor(idx.count / 3) : Math.floor(pos.count / 3);
+      const leftIdx = [], rightIdx = [];
+      for (let t = 0; t < triCount; t++) {
+        const i0 = idx ? idx.getX(t * 3) : t * 3;
+        const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+        const i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+        const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+        if (cz < 0) leftIdx.push(i0, i1, i2);
+        else rightIdx.push(i0, i1, i2);
+      }
+      child.visible = false;
+      [leftIdx, rightIdx].forEach((sideIdx) => {
+        if (!sideIdx.length) return;
+        const box = new THREE.Box3();
+        for (let k = 0; k < sideIdx.length; k++) box.expandByPoint(tmpV.fromBufferAttribute(pos, sideIdx[k]));
+        const c = new THREE.Vector3();
+        box.getCenter(c);
+        const sideGeo = baseGeo.clone();
+        sideGeo.setIndex(sideIdx);
+        sideGeo.translate(-c.x, -c.y, -c.z);
+        const propMesh = new THREE.Mesh(sideGeo, child.material);
+        propMesh.position.copy(c);
+        root.add(propMesh);
+        rotors.push({ obj: propMesh, axis: 'x', speedMul: 2.4 });
+      });
+    });
+    return rotors;
+  }
+
+  if (fileName === 'stylized_war_plane.glb') {
+    let fanNode = null;
+    root.traverse((node) => {
+      if ((node.name || '').toLowerCase() === 'fan_1') fanNode = node;
+    });
+    if (fanNode) {
+      // Align spin axis to the taildragger's tilted +14.7deg nose propeller shaft
+      const shaftPivot = new THREE.Group();
+      shaftPivot.position.set(0, 7.855, 12.7);
+      shaftPivot.rotation.x = -0.256;
+      root.add(shaftPivot);
+      shaftPivot.updateMatrixWorld(true);
+      const invPivot = shaftPivot.matrixWorld.clone().invert();
+
+      const spinGroup = new THREE.Group();
+      shaftPivot.add(spinGroup);
+
+      const propMeshes = [];
+      fanNode.traverse((ch) => {
+        if (ch.isMesh && ch.geometry) propMeshes.push(ch);
+      });
+      propMeshes.forEach((ch) => {
+        const g = ch.geometry.clone();
+        g.applyMatrix4(invPivot.clone().multiply(ch.matrixWorld));
+        spinGroup.add(new THREE.Mesh(g, ch.material));
+        ch.visible = false;
+      });
+      rotors.push({ obj: spinGroup, axis: 'z', speedMul: 2.6 });
+    }
     return rotors;
   }
 
@@ -239,8 +468,13 @@ export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset
   const root = SkeletonUtils.clone(scene);
   const fileName = (url || '').split('/').pop();
 
+  const toRemove = [];
   root.traverse((node) => {
     const name = (node.name || '').toLowerCase();
+    if (name.startsWith('plane_')) {
+      toRemove.push(node);
+      return;
+    }
     if (name.includes('shadow') || (name.includes('ground') && !name.includes('compound'))) {
       node.visible = false;
     }
@@ -301,6 +535,7 @@ export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset
     }
   });
 
+  toRemove.forEach((n) => n.parent?.remove(n));
   const rotors = vehicleType === 'helicopter' ? setupHelicopterRotors(root, fileName) : [];
 
   root.updateMatrixWorld(true);
@@ -334,6 +569,10 @@ export function adaptVehicleGLBScene(scene, url, { targetLength, waterlineOffset
   wrapper.add(root);
   wrapper.scale.setScalar(finalLength / Math.max(0.01, size.z));
   wrapper.updateMatrixWorld(true);
+
+  if (fileName === 'aquitaine_-_french_ship.glb') {
+    customizeAquitaineFrigate(wrapper);
+  }
 
   return { wrapper, rotors };
 }

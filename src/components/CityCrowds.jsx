@@ -21,6 +21,8 @@ const EXCLUDE_SPOTS = [
   [386, -49.35, 16], // West Bridge Entry Avenue
   [430, -20, 14],    // West Helipad
   [670, 20, 16],     // Central Seahawk Helipad
+  [435, 44, 18],     // Runway 01 (Axis Fighter)
+  [560, 74, 18],     // Runway 02 (Stylized Warplane)
   [378, -51.6, 10],  // West Marina Ramp Top
   [755, 116.8, 10],  // South Frigate Ramp Top
   [1145, 40.8, 10]   // East Tugboat Ramp Top

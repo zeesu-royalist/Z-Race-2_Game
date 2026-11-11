@@ -145,6 +145,28 @@ const CURATED_HELICOPTERS = {
     camScale: 3.1,
     specs: { topSpeed: '275 KM/H', acceleration: '2.2 SEC', power: '3800 SHP', handling: 'NAVAL HAWK' },
     tuning: { maxSpeed: 68, accelRate: 20, climbRate: 15, turnMultiplier: 1.05 }
+  },
+  'axis_fighter_plane.glb': {
+    name: 'Axis Twin-Engine Interceptor',
+    brand: 'Axis Aero',
+    category: 'Twin-Prop Fighter Plane',
+    flightMode: 'plane',
+    targetLength: 9.0,
+    waterlineOffset: 0,
+    camScale: 2.7,
+    specs: { topSpeed: '360 KM/H', acceleration: '2.4 SEC', power: '2400 HP', handling: 'AERO BANK' },
+    tuning: { maxSpeed: 100, accelRate: 25, climbRate: 22, turnMultiplier: 1.18, flightMode: 'plane' }
+  },
+  'stylized_war_plane.glb': {
+    name: 'Corsair Stylized Warplane',
+    brand: 'SkyForge',
+    category: 'Radial Prop Warbird',
+    flightMode: 'plane',
+    targetLength: 11.4,
+    waterlineOffset: 0,
+    camScale: 2.5,
+    specs: { topSpeed: '330 KM/H', acceleration: '2.6 SEC', power: '2100 HP', handling: 'STOL WING' },
+    tuning: { maxSpeed: 92, accelRate: 23, climbRate: 20, turnMultiplier: 1.22, flightMode: 'plane' }
   }
 };
 
@@ -164,6 +186,7 @@ function scanModelFolder({ dirPath, manifestPath, urlPrefix, curatedMap, vehicle
       id: file.replace(/\.(glb|gltf)$/i, '').replace(/[^a-zA-Z0-9_-]/g, '-'),
       fileName: file,
       vehicleType,
+      flightMode: curated?.flightMode || (/plane|jet|fighter/i.test(file) ? 'plane' : vehicleType),
       name: curated ? curated.name : cleanFileName(file),
       modelPath: `${urlPrefix}/${file}`,
       brand: curated ? curated.brand : defaultBrand,
@@ -172,7 +195,7 @@ function scanModelFolder({ dirPath, manifestPath, urlPrefix, curatedMap, vehicle
       waterlineOffset: curated?.waterlineOffset ?? (vehicleType === 'boat' ? 0.18 : 0),
       camScale: curated?.camScale || (vehicleType === 'boat' ? 2.3 : vehicleType === 'helicopter' ? 2.5 : 1.0),
       specs: curated ? curated.specs : defaultSpecs,
-      tuning: curated?.tuning || defaultTuning
+      tuning: curated?.tuning || (/plane|jet|fighter/i.test(file) ? { ...defaultTuning, flightMode: 'plane' } : defaultTuning)
     };
   });
 

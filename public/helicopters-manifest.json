@@ -1,8 +1,35 @@
 [
   {
+    "id": "axis_fighter_plane",
+    "fileName": "axis_fighter_plane.glb",
+    "vehicleType": "helicopter",
+    "flightMode": "plane",
+    "name": "Axis Twin-Engine Interceptor",
+    "modelPath": "/Helicopters/axis_fighter_plane.glb",
+    "brand": "Axis Aero",
+    "category": "Twin-Prop Fighter Plane",
+    "targetLength": 9,
+    "waterlineOffset": 0,
+    "camScale": 2.7,
+    "specs": {
+      "topSpeed": "360 KM/H",
+      "acceleration": "2.4 SEC",
+      "power": "2400 HP",
+      "handling": "AERO BANK"
+    },
+    "tuning": {
+      "maxSpeed": 100,
+      "accelRate": 25,
+      "climbRate": 22,
+      "turnMultiplier": 1.18,
+      "flightMode": "plane"
+    }
+  },
+  {
     "id": "helicopter",
     "fileName": "helicopter.glb",
     "vehicleType": "helicopter",
+    "flightMode": "helicopter",
     "name": "Paris Eurocopter EC135",
     "modelPath": "/Helicopters/helicopter.glb",
     "brand": "Airbus Heli",
@@ -27,6 +54,7 @@
     "id": "sh-60b_seahawk_helicopter",
     "fileName": "sh-60b_seahawk_helicopter.glb",
     "vehicleType": "helicopter",
+    "flightMode": "helicopter",
     "name": "Sikorsky SH-60B Seahawk",
     "modelPath": "/Helicopters/sh-60b_seahawk_helicopter.glb",
     "brand": "Sikorsky Aero",
@@ -45,6 +73,32 @@
       "accelRate": 20,
       "climbRate": 15,
       "turnMultiplier": 1.05
+    }
+  },
+  {
+    "id": "stylized_war_plane",
+    "fileName": "stylized_war_plane.glb",
+    "vehicleType": "helicopter",
+    "flightMode": "plane",
+    "name": "Corsair Stylized Warplane",
+    "modelPath": "/Helicopters/stylized_war_plane.glb",
+    "brand": "SkyForge",
+    "category": "Radial Prop Warbird",
+    "targetLength": 11.4,
+    "waterlineOffset": 0,
+    "camScale": 2.5,
+    "specs": {
+      "topSpeed": "330 KM/H",
+      "acceleration": "2.6 SEC",
+      "power": "2100 HP",
+      "handling": "STOL WING"
+    },
+    "tuning": {
+      "maxSpeed": 92,
+      "accelRate": 23,
+      "climbRate": 20,
+      "turnMultiplier": 1.22,
+      "flightMode": "plane"
     }
   }
 ]

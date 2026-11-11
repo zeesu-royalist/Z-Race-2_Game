@@ -295,7 +295,7 @@ export const BOAT_CATALOG = [
     brand: 'Marine Nationale',
     category: 'French Naval Warship',
     targetLength: 24.0,
-    waterlineOffset: 0.22,
+    waterlineOffset: 0.145,
     camScale: 4.3,
     specs: { topSpeed: '105 KM/H', acceleration: '4.4 SEC', handling: 'TURBINE SHIP', power: '32 MW' },
     tuning: { maxSpeed: 30, accelRate: 11, gripFactor: 0.82, turnMultiplier: 0.72 }
@@ -331,5 +331,35 @@ export const HELI_CATALOG = [
     camScale: 3.1,
     specs: { topSpeed: '275 KM/H', acceleration: '2.2 SEC', handling: 'NAVAL HAWK', power: '3800 SHP' },
     tuning: { maxSpeed: 68, accelRate: 20, climbRate: 15, turnMultiplier: 1.05 }
+  },
+  {
+    id: 'axis_fighter_plane',
+    fileName: 'axis_fighter_plane.glb',
+    vehicleType: 'helicopter',
+    flightMode: 'plane',
+    name: 'Axis Twin-Engine Interceptor',
+    modelPath: '/Helicopters/axis_fighter_plane.glb',
+    brand: 'Axis Aero',
+    category: 'Twin-Prop Fighter Plane',
+    targetLength: 9.0,
+    waterlineOffset: 0,
+    camScale: 2.7,
+    specs: { topSpeed: '360 KM/H', acceleration: '2.4 SEC', handling: 'AERO BANK', power: '2400 HP' },
+    tuning: { maxSpeed: 100, accelRate: 25, climbRate: 22, turnMultiplier: 1.18, flightMode: 'plane' }
+  },
+  {
+    id: 'stylized_war_plane',
+    fileName: 'stylized_war_plane.glb',
+    vehicleType: 'helicopter',
+    flightMode: 'plane',
+    name: 'Corsair Stylized Warplane',
+    modelPath: '/Helicopters/stylized_war_plane.glb',
+    brand: 'SkyForge',
+    category: 'Radial Prop Warbird',
+    targetLength: 11.4,
+    waterlineOffset: 0,
+    camScale: 2.5,
+    specs: { topSpeed: '330 KM/H', acceleration: '2.6 SEC', handling: 'STOL WING', power: '2100 HP' },
+    tuning: { maxSpeed: 92, accelRate: 23, climbRate: 20, turnMultiplier: 1.22, flightMode: 'plane' }
   }
 ];

@@ -129,13 +129,9 @@ export function SpeedometerHUD() {
         </div>
       )}
 
-      {/* Proximity Auto / Instant Switch Prompt (Car <-> Boats & Helicopters) */}
+      {/* Interactive Enter-Vehicle Prompt with dedicated side ENTER button */}
       {nearbyPrompt && (
-        <button
-          type="button"
-          className={`proximity-switch-pill ${nearbyPrompt.kind === 'return_car' ? 'is-car-return' : ''}`}
-          onClick={handleProximitySwitch}
-        >
+        <div className={`proximity-switch-pill ${nearbyPrompt.kind === 'return_car' ? 'is-car-return' : ''}`}>
           {nearbyPrompt.kind === 'return_car' ? (
             <Car size={16} />
           ) : nearbyPrompt.kind === 'board_heli' ? (
@@ -143,12 +139,15 @@ export function SpeedometerHUD() {
           ) : (
             <Ship size={16} />
           )}
-          <span>
-            {nearbyPrompt.kind === 'return_car'
-              ? `PARKED CAR NEARBY (${nearbyPrompt.label.toUpperCase()}) — APPROACH OR TAP / [E]`
-              : `${nearbyPrompt.kind === 'board_heli' ? 'HELIPAD' : 'DOCKED'} ${nearbyPrompt.label.toUpperCase()} — APPROACH OR TAP / [E]`}
-          </span>
-        </button>
+          <span className="proximity-prompt-text">Enter in this vehicle</span>
+          <button
+            type="button"
+            className="proximity-enter-btn"
+            onClick={handleProximitySwitch}
+          >
+            ENTER (E)
+          </button>
+        </div>
       )}
 
       {/* Water Submersion Alert + Quick Recovery */}

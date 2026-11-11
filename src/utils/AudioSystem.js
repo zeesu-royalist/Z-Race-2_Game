@@ -8,7 +8,8 @@ const PROFILES = {
   w16_quad: { base: [60, 280], f: [600, 2600], osc: 'sawtooth', boost: 1300, gain: [0.38, 0.42, 0.12, 0.30] },
   jdm_turbo: { base: [68, 320], f: [650, 2800], osc: 'sawtooth', boost: 1300, gain: [0.35, 0.40, 0.10, 0.30] },
   marine: { base: [44, 175], f: [400, 1650], osc: 'sawtooth', boost: 750, gain: [0.32, 0.36, 0.09, 0.24] },
-  helicopter: { base: [30, 82], f: [260, 820], osc: 'sawtooth', boost: 340, gain: [0.28, 0.34, 0.08, 0.22] }
+  helicopter: { sample: '/audio/helicopter.wav', rate: [0.88, 0.42], sGain: [0.55, 0.18, 0.25] },
+  plane: { sample: '/audio/plane.wav', rate: [0.82, 0.56], sGain: [0.52, 0.18, 0.28] }
 };
 
 class SoundSystem {
@@ -33,6 +34,11 @@ class SoundSystem {
 
     this.nitroGain = null;
     this.nitroNoise = null;
+
+    this.sampleGain = null;
+    this.sampleBuffers = {};
+    this.sampleSrc = null;
+    this.sampleKey = '';
   }
 
   init() {
@@ -143,11 +149,47 @@ class SoundSystem {
       this.nitroGain.connect(this.masterGain);
       nitroNoiseSource.start();
 
+      // 4. Real Sampled Aircraft Engine Bus (Helicopter & Plane seamless loops)
+      this.sampleGain = this.ctx.createGain();
+      this.sampleGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+      this.sampleGain.connect(this.masterGain);
+      ['helicopter', 'plane'].forEach((k) => {
+        this.sampleBuffers[k] = 'loading';
+        fetch(PROFILES[k].sample)
+          .then((r) => r.arrayBuffer())
+          .then((ab) => this.ctx.decodeAudioData(ab))
+          .then((audioBuf) => { this.sampleBuffers[k] = audioBuf; })
+          .catch(() => { delete this.sampleBuffers[k]; });
+      });
+
       this.initialized = true;
       if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     } catch (e) {
       console.warn('Web Audio init error:', e);
     }
+  }
+
+  _syncSample(key) {
+    if (this.sampleKey === key) return;
+    if (this.sampleSrc) {
+      try { this.sampleSrc.stop(); this.sampleSrc.disconnect(); } catch {}
+      this.sampleSrc = null;
+    }
+    this.sampleKey = '';
+    if (!key && this.sampleGain && this.ctx) {
+      this.sampleGain.gain.cancelScheduledValues(0);
+      this.sampleGain.gain.value = 0;
+      return;
+    }
+    const buf = key ? this.sampleBuffers[key] : null;
+    if (!buf || typeof buf === 'string') return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(this.sampleGain);
+    src.start();
+    this.sampleSrc = src;
+    this.sampleKey = key;
   }
 
   resume() {
@@ -169,6 +211,7 @@ class SoundSystem {
     else if (cat.includes('scuderia') || cat.includes('vision') || cat.includes('ferrari') || cat.includes('lamborghini')) this.currentProfile = 'v12_screamer';
     else if (cat.includes('w16') || cat.includes('bugatti') || cat.includes('titan')) this.currentProfile = 'w16_quad';
     else if (cat.includes('boat') || cat.includes('ship') || cat.includes('tug') || cat.includes('yacht') || cat.includes('vessel')) this.currentProfile = 'marine';
+    else if (cat.includes('plane') || cat.includes('warbird') || cat.includes('prop') || cat.includes('fighter') || cat.includes('wing')) this.currentProfile = 'plane';
     else if (cat.includes('rotor') || cat.includes('hawk') || cat.includes('heli') || cat.includes('chopper')) this.currentProfile = 'helicopter';
     else this.currentProfile = 'jdm_turbo';
   }
@@ -177,6 +220,7 @@ class SoundSystem {
     if (!this.initialized) this.init();
     if (!this.enabled || !this.ctx) {
       if (this.engineGain && this.ctx) this.engineGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      if (this.sampleGain && this.ctx) this.sampleGain.gain.setValueAtTime(0, this.ctx.currentTime);
       return;
     }
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
@@ -185,6 +229,19 @@ class SoundSystem {
     const normRPM = Math.max(0, Math.min(1, (rpm - 900) / 7100));
     const t = this.ctx.currentTime;
     const prof = PROFILES[this.currentProfile] || PROFILES.jdm_turbo;
+
+    if (prof.sample) {
+      this.engineGain.gain.setTargetAtTime(0, t, 0.04);
+      this._syncSample(this.currentProfile);
+      if (this.sampleSrc) {
+        this.sampleSrc.playbackRate.setTargetAtTime(prof.rate[0] + normRPM * prof.rate[1], t, 0.06);
+      }
+      const g = prof.sGain[0] + (throttle ? prof.sGain[1] : 0) + normRPM * prof.sGain[2];
+      this.sampleGain.gain.setTargetAtTime(this.sampleSrc ? g : 0, t, 0.05);
+      return;
+    }
+
+    this._syncSample('');
 
     const baseFreq = prof.base[0] + normRPM * prof.base[1];
     const fFreq = prof.f[0] + normRPM * prof.f[1] + (throttle ? prof.boost : 0);

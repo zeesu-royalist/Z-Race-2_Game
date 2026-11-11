@@ -37,6 +37,18 @@ export const HELIPAD_HOME_SLOTS = {
     position: [670, 0.14, 20.0],
     rotationY: -Math.PI * 0.35,
     pierPark: [656, 0.14, 20.0]
+  },
+  axis_fighter_plane: {
+    flightMode: 'plane',
+    position: [435, 0.01, 44.0],
+    rotationY: Math.PI * 0.5,
+    pierPark: [418, 0.02, 44.0]
+  },
+  stylized_war_plane: {
+    flightMode: 'plane',
+    position: [560, 0.01, 74.0],
+    rotationY: Math.PI * 0.5,
+    pierPark: [542, 0.02, 74.0]
   }
 };
 
@@ -47,15 +59,17 @@ function buildWorldSlots(list, slotsMap, vehicleType, existing = []) {
     const home = slotsMap[item.id] || (isHeli
       ? { position: [430 + idx * 45, 0.05, -20.0], rotationY: 0, pierPark: [418 + idx * 45, 0.05, -20.0] }
       : { position: [430 + idx * 18, WATER_SURFACE_Y, -88.0], rotationY: Math.PI * 0.5, pierPark: [386, WATER_SURFACE_Y + 0.44, -74.5] });
+    const flightMode = home.flightMode || item.flightMode || item.tuning?.flightMode || vehicleType;
     return {
       id: item.id,
       vehicleType,
+      flightMode,
       modelPath: item.modelPath,
       name: item.name,
       brand: item.brand || (isHeli ? 'AIRBUS' : 'MARINE'),
       targetLength: item.targetLength || (isHeli ? 11.5 : 11.0),
       waterlineOffset: item.waterlineOffset ?? (isHeli ? 0 : 0.18),
-      boardRadius: isHeli ? 11.0 : ((item.targetLength || 11.0) > 16 ? 16.5 : 11.5),
+      boardRadius: flightMode === 'plane' ? 12.5 : isHeli ? 11.0 : ((item.targetLength || 11.0) > 16 ? 16.5 : 11.5),
       position: prev ? [...prev.position] : [...home.position],
       rotationY: prev ? prev.rotationY : home.rotationY,
       homePosition: [...home.position],
@@ -192,7 +206,6 @@ export const useGameStore = create((set, get) => ({
 
   boardWorldVehicle: (type, vehicleId, carPos, carRotY) => {
     const st = get();
-    if (st.vehicleType !== 'car') return;
     const isHeli = type === 'helicopter';
     const pool = isHeli ? st.helicopters : st.boats;
     const worldPool = isHeli ? st.dockedHelicopters : st.dockedBoats;
@@ -200,21 +213,29 @@ export const useGameStore = create((set, get) => ({
     const slot = worldPool.find((v) => v.id === vehicleId);
     if (!item || !slot) return;
 
-    const activeCar = st.cars.find((c) => c.id === st.currentCarId) || st.cars.find((c) => c.id === st.lastCarId) || defaultCar;
-    const carSpot = Array.isArray(carPos) ? [carPos[0], carPos[1], carPos[2]] : [...slot.pierPark];
-
-    set({
-      ...applyVehicleFields(item, type, activeCar.id, defaultCar),
-      parkedCar: {
+    let nextParkedCar = st.parkedCar;
+    let nextLastCarId = st.lastCarId;
+    if (st.vehicleType === 'car') {
+      const activeCar = st.cars.find((c) => c.id === st.currentCarId) || st.cars.find((c) => c.id === st.lastCarId) || defaultCar;
+      const carSpot = Array.isArray(carPos) ? [carPos[0], carPos[1], carPos[2]] : [...slot.pierPark];
+      nextLastCarId = activeCar.id;
+      nextParkedCar = {
         carId: activeCar.id,
         modelPath: activeCar.modelPath,
         name: activeCar.name,
         brand: activeCar.brand || 'CAR',
         position: carSpot,
         rotationY: carRotY ?? Math.PI * 0.5
-      },
+      };
+    } else {
+      st.parkCurrentWorldPose(st.carPosition, st.carRotation);
+    }
+
+    set({
+      ...applyVehicleFields(item, type, nextLastCarId, defaultCar),
+      parkedCar: nextParkedCar,
       nearbyPrompt: null,
-      switchLock: { cooldownUntil: performance.now() + 2400, armedCarReturn: false, blockedBoatId: null }
+      switchLock: { cooldownUntil: performance.now() + 800, armedCarReturn: false, blockedBoatId: null }
     });
     get().teleportTo(slot.position, slot.rotationY);
   },
